@@ -1,0 +1,8 @@
+{
+  "name": "2026خشتا ماموستایا",
+  "description": "بەرنامەکێ پێشکەفتی بۆ ڕێکخستنا جەتوەلا وانێن روژانە ب تایبەتی بۆ ماموستایێن کیمیایێ، دگەل تایبەتمەندیا دەوامێن سپێدە و هێڤاری.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
