@@ -3,6 +3,9 @@ import {
   WeekSchedule, 
   LessonSlot, 
   CLASSES, 
+  GRADES,
+  SECTIONS,
+  ALL_SUBJECTS,
   DAYS, 
   AlarmSettings, 
   DEFAULT_ALARM_SETTINGS,
@@ -135,6 +138,12 @@ const App: React.FC = () => {
 
   // Alarm & Timing Settings
   const [alarmSettings, setAlarmSettings] = useState<AlarmSettings>(DEFAULT_ALARM_SETTINGS);
+
+  // Lockscreen Wallpaper Generator State
+  const [showWallpaperModal, setShowWallpaperModal] = useState(false);
+  const [wallpaperTheme, setWallpaperTheme] = useState<'indigo' | 'amoled' | 'emerald' | 'amber' | 'white'>('indigo');
+  const [wallpaperMode, setWallpaperMode] = useState<'full' | 'today'>('full');
+  const wallpaperCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const toggleViewMode = () => setViewMode((prev) => (prev === 'modern' ? 'classic' : 'modern'));
   const currentDayData = schedule[activeDay] || schedule[DAYS[0]];
@@ -570,21 +579,238 @@ const App: React.FC = () => {
   };
 
   const sendNotification = (title: string, body: string) => {
-    if (Notification.permission === "granted") {
-      if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+    if ("Notification" in window && Notification.permission === "granted") {
+      if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'TRIGGER_ALARM_NOTIFICATION',
+          title,
+          body,
+        });
+      } else if (navigator.serviceWorker && navigator.serviceWorker.ready) {
         navigator.serviceWorker.ready.then((reg) => {
           reg.showNotification(title, {
             body: body,
-            icon: "/icon-192.png",
-            vibrate: [200, 100, 200],
-            tag: "alarm-notify",
+            icon: "./icon-192.png",
+            badge: "./icon-192.png",
+            vibrate: [300, 100, 300, 100, 300, 100, 500],
+            tag: "lesson-alarm-lockscreen",
+            renotify: true,
+            requireInteraction: true,
           } as any);
         });
       } else {
-        new Notification(title, { body, icon: "/icon-192.png" });
+        new Notification(title, { body, icon: "./icon-192.png" });
       }
     }
   };
+
+  // Lockscreen Wallpaper Render Function (HD 1080x1920)
+  const renderWallpaperCanvas = () => {
+    const canvas = wallpaperCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = 1080;
+    const height = 1920;
+    canvas.width = width;
+    canvas.height = height;
+
+    // Background Theme
+    if (wallpaperTheme === 'amoled') {
+      ctx.fillStyle = '#050508';
+      ctx.fillRect(0, 0, width, height);
+    } else if (wallpaperTheme === 'indigo') {
+      const grad = ctx.createLinearGradient(0, 0, 0, height);
+      grad.addColorStop(0, '#0f172a');
+      grad.addColorStop(0.4, '#1e1b4b');
+      grad.addColorStop(1, '#090d16');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, width, height);
+    } else if (wallpaperTheme === 'emerald') {
+      const grad = ctx.createLinearGradient(0, 0, 0, height);
+      grad.addColorStop(0, '#022c22');
+      grad.addColorStop(0.5, '#064e3b');
+      grad.addColorStop(1, '#022c22');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, width, height);
+    } else if (wallpaperTheme === 'amber') {
+      const grad = ctx.createLinearGradient(0, 0, 0, height);
+      grad.addColorStop(0, '#451a03');
+      grad.addColorStop(0.5, '#78350f');
+      grad.addColorStop(1, '#1c1917');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, width, height);
+    } else {
+      const grad = ctx.createLinearGradient(0, 0, 0, height);
+      grad.addColorStop(0, '#f8fafc');
+      grad.addColorStop(1, '#e2e8f0');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, width, height);
+    }
+
+    const isLight = wallpaperTheme === 'white';
+    const textColor = isLight ? '#0f172a' : '#ffffff';
+    const subTextColor = isLight ? '#475569' : '#94a3b8';
+    const cardBg = isLight ? 'rgba(255, 255, 255, 0.85)' : 'rgba(255, 255, 255, 0.08)';
+    const cardBorder = isLight ? 'rgba(203, 213, 225, 0.8)' : 'rgba(255, 255, 255, 0.15)';
+    const accentColor = wallpaperTheme === 'emerald' ? '#34d399' : wallpaperTheme === 'amber' ? '#fbbf24' : '#818cf8';
+
+    // Reserve top 22% space for mobile lockscreen clock widget
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 30px Vazirmatn, sans-serif';
+    ctx.fillStyle = isLight ? '#64748b' : 'rgba(255, 255, 255, 0.4)';
+    ctx.fillText('⚡ جهـتوەلا من — شاشەیا قوفلێ', width / 2, 420);
+
+    ctx.font = '900 50px Vazirmatn, sans-serif';
+    ctx.fillStyle = textColor;
+    ctx.fillText('ماموستا حوسێن — کیمیا', width / 2, 490);
+
+    ctx.font = '700 30px Vazirmatn, sans-serif';
+    ctx.fillStyle = accentColor;
+    ctx.fillText('جەتوەلا وانێن قوتابخانێ (2026)', width / 2, 540);
+    ctx.restore();
+
+    let startY = 600;
+
+    if (wallpaperMode === 'today') {
+      const todayData = schedule[activeDay] || schedule[DAYS[0]];
+      const slots = todayData?.slots || [];
+
+      ctx.save();
+      ctx.font = '900 38px Vazirmatn, sans-serif';
+      ctx.fillStyle = textColor;
+      ctx.textAlign = 'center';
+      ctx.fillText(`📅 جەتوەلا ڕۆژا ${activeDay} (${todayData?.shift === 'morning' ? 'سپێدە' : 'هێڤاری'})`, width / 2, startY);
+      ctx.restore();
+
+      startY += 55;
+
+      slots.forEach((slot, idx) => {
+        const cardX = 80;
+        const cardW = width - 160;
+        const cardH = 145;
+
+        ctx.save();
+        ctx.beginPath();
+        if ((ctx as any).roundRect) (ctx as any).roundRect(cardX, startY, cardW, cardH, 28);
+        else ctx.rect(cardX, startY, cardW, cardH);
+        ctx.fillStyle = cardBg;
+        ctx.fill();
+        ctx.strokeStyle = cardBorder;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = accentColor;
+        ctx.beginPath();
+        if ((ctx as any).roundRect) (ctx as any).roundRect(cardX + 25, startY + 25, 140, 95, 20);
+        else ctx.rect(cardX + 25, startY + 25, 140, 95);
+        ctx.fill();
+
+        ctx.fillStyle = isLight ? '#ffffff' : '#0f172a';
+        ctx.font = '900 34px Vazirmatn, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`وانا ${idx + 1}`, cardX + 95, startY + 82);
+
+        ctx.textAlign = 'right';
+        ctx.fillStyle = textColor;
+        ctx.font = '900 42px Vazirmatn, sans-serif';
+        const classNameStr = slot.className === 'بێ وانە' ? 'بەتاڵ (بێ وانە)' : (slot.className.startsWith('پۆلا') ? slot.className : `پۆلا ${slot.className}`);
+        ctx.fillText(classNameStr, cardX + cardW - 35, startY + 70);
+
+        ctx.font = '700 28px Vazirmatn, sans-serif';
+        ctx.fillStyle = subTextColor;
+        ctx.fillText(`${slot.subject || 'کیمیا'}  •  ⏰ ${slot.startTime} — ${slot.endTime}`, cardX + cardW - 35, startY + 118);
+
+        ctx.restore();
+        startY += cardH + 20;
+      });
+
+    } else {
+      DAYS.forEach((dayName) => {
+        const dayData = schedule[dayName];
+        if (!dayData) return;
+
+        const cardX = 50;
+        const cardW = width - 100;
+        const cardH = 210;
+
+        ctx.save();
+        ctx.beginPath();
+        if ((ctx as any).roundRect) (ctx as any).roundRect(cardX, startY, cardW, cardH, 24);
+        else ctx.rect(cardX, startY, cardW, cardH);
+        ctx.fillStyle = cardBg;
+        ctx.fill();
+        ctx.strokeStyle = cardBorder;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.textAlign = 'right';
+        ctx.font = '900 36px Vazirmatn, sans-serif';
+        ctx.fillStyle = accentColor;
+        ctx.fillText(`• ${dayName} (${dayData.shift === 'morning' ? 'سپێدە' : 'هێڤاری'})`, cardX + cardW - 25, startY + 50);
+
+        const slotCount = dayData.slots.length || 6;
+        const slotWidth = (cardW - 50) / slotCount;
+
+        dayData.slots.forEach((slot, sIdx) => {
+          const sx = cardX + 25 + sIdx * slotWidth;
+          const sy = startY + 75;
+
+          ctx.beginPath();
+          if ((ctx as any).roundRect) (ctx as any).roundRect(sx, sy, slotWidth - 10, 110, 16);
+          else ctx.rect(sx, sy, slotWidth - 10, 110);
+          ctx.fillStyle = slot.className === 'بێ وانە'
+            ? (isLight ? 'rgba(226, 232, 240, 0.6)' : 'rgba(255, 255, 255, 0.04)')
+            : (isLight ? 'rgba(79, 70, 229, 0.12)' : 'rgba(99, 102, 241, 0.28)');
+          ctx.fill();
+
+          ctx.textAlign = 'center';
+          ctx.fillStyle = isLight ? '#475569' : '#cbd5e1';
+          ctx.font = 'bold 22px Vazirmatn, sans-serif';
+          ctx.fillText(`و${sIdx + 1}`, sx + (slotWidth - 10) / 2, sy + 32);
+
+          ctx.font = '900 28px Vazirmatn, sans-serif';
+          ctx.fillStyle = slot.className === 'بێ وانە' ? (isLight ? '#94a3b8' : '#64748b') : textColor;
+          const shortClass = slot.className.replace('پۆلا ', '');
+          ctx.fillText(shortClass, sx + (slotWidth - 10) / 2, sy + 72);
+
+          ctx.font = '700 18px Vazirmatn, sans-serif';
+          ctx.fillStyle = subTextColor;
+          ctx.fillText((slot.subject || 'کیمیا').slice(0, 7), sx + (slotWidth - 10) / 2, sy + 98);
+        });
+
+        ctx.restore();
+        startY += cardH + 20;
+      });
+    }
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = '700 28px Vazirmatn, sans-serif';
+    ctx.fillStyle = subTextColor;
+    ctx.fillText('📱 بەرنامەیێ جەتوەلا من — م. حوسێن | 2026', width / 2, height - 60);
+    ctx.restore();
+  };
+
+  const downloadWallpaperImage = () => {
+    const canvas = wallpaperCanvasRef.current;
+    if (!canvas) return;
+    const url = canvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `jadwal_lockscreen_wallpaper_${wallpaperMode}_${wallpaperTheme}.png`;
+    a.click();
+  };
+
+  useEffect(() => {
+    if (showWallpaperModal) {
+      setTimeout(() => {
+        renderWallpaperCanvas();
+      }, 150);
+    }
+  }, [showWallpaperModal, wallpaperTheme, wallpaperMode, schedule, activeDay]);
 
   // Bell scheduling loop
   useEffect(() => {
@@ -1043,6 +1269,135 @@ const App: React.FC = () => {
             >
               تێگەیشتم (داخستن)
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Lockscreen Wallpaper Generator Modal */}
+      {showWallpaperModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4 overflow-y-auto">
+          <div className="bg-white rounded-[2.5rem] max-w-2xl w-full shadow-2xl overflow-hidden my-auto border border-slate-100 animate-in fade-in duration-200">
+            {/* Modal Header */}
+            <div className="p-6 border-b flex items-center justify-between bg-gradient-to-r from-cyan-600 via-indigo-600 to-purple-600 text-white">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-white/20 backdrop-blur-sm rounded-2xl shadow-inner">
+                  <Smartphone className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-black text-lg text-white">درۆستکەرا ڕەسمێ شاشەیا قوفلێ (Lockscreen Wallpaper)</h3>
+                  <p className="text-xs text-cyan-100 font-medium">ڕەسمەکێ بەرزا کیفیەت (HD 1080x1920) دروست بکە بۆ سەر شاشەیا قوفلا مۆبایلا خۆ</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowWallpaperModal(false)}
+                className="p-2 hover:bg-white/20 rounded-full text-white/80 hover:text-white transition-all"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto no-scrollbar">
+              {/* Controls */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-3xl border border-slate-200">
+                {/* Mode Selector */}
+                <div>
+                  <label className="text-xs font-black text-slate-700 block mb-2">ناڤەرۆکا ڕەسمی:</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setWallpaperMode('full')}
+                      className={`py-2.5 px-3 rounded-2xl text-xs font-black border transition-all ${
+                        wallpaperMode === 'full'
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      خشتەیێ هەمی هەفتێ
+                    </button>
+                    <button
+                      onClick={() => setWallpaperMode('today')}
+                      className={`py-2.5 px-3 rounded-2xl text-xs font-black border transition-all ${
+                        wallpaperMode === 'today'
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      جەتوەلا ئەڤڕۆ ({activeDay})
+                    </button>
+                  </div>
+                </div>
+
+                {/* Theme Selector */}
+                <div>
+                  <label className="text-xs font-black text-slate-700 block mb-2">ڕەنگ و ستایلێ بکگراوەندێ:</label>
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+                    {[
+                      { id: 'indigo', label: 'شین', bg: 'bg-indigo-900', text: 'text-white' },
+                      { id: 'amoled', label: 'ڕەش (AMOLED)', bg: 'bg-black', text: 'text-white' },
+                      { id: 'emerald', label: 'کەسک', bg: 'bg-emerald-900', text: 'text-white' },
+                      { id: 'amber', label: 'پرتەقاڵی', bg: 'bg-amber-900', text: 'text-white' },
+                      { id: 'white', label: 'سپی زێڕین', bg: 'bg-slate-100 border-slate-300', text: 'text-slate-800' },
+                    ].map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => setWallpaperTheme(t.id as any)}
+                        className={`px-3 py-2 rounded-xl text-[11px] font-bold border transition-all flex items-center gap-1.5 flex-shrink-0 ${t.bg} ${t.text} ${
+                          wallpaperTheme === t.id ? 'ring-2 ring-indigo-500 ring-offset-2 scale-105' : 'opacity-80'
+                        }`}
+                      >
+                        <span>{t.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* HD Canvas Preview */}
+              <div className="flex flex-col items-center justify-center bg-slate-900 p-4 rounded-3xl border-4 border-slate-800 shadow-inner">
+                <p className="text-[11px] text-slate-400 font-bold mb-3 flex items-center gap-1.5">
+                  <Smartphone className="w-4 h-4 text-indigo-400" />
+                  شاشەیا مۆبایلێ (1080x1920 HD Ratio): ل بەشا سەرەوە جهێ کاتژمێرا قوفلێ چۆڵ هاتیە هێلان
+                </p>
+                <div className="relative w-full max-w-[280px] aspect-[9/16] rounded-[2rem] overflow-hidden border-4 border-slate-700 shadow-2xl bg-black">
+                  <canvas
+                    ref={wallpaperCanvasRef}
+                    className="w-full h-full object-contain cursor-pointer"
+                    title="کلیک بکە بۆ داگرتن"
+                    onClick={downloadWallpaperImage}
+                  />
+                </div>
+              </div>
+
+              {/* Instructions */}
+              <div className="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-100 text-xs font-bold text-indigo-950 space-y-2">
+                <p className="flex items-center gap-1.5 font-black text-indigo-900">
+                  <Sparkles className="w-4 h-4 text-indigo-600" />
+                  چەوان بکەمە ب باکگراوەندا شاشەیا قوفلا مۆبایلێ (Lock Screen Wallpaper)؟
+                </p>
+                <ol className="list-decimal list-inside space-y-1 text-slate-700 text-[11px] leading-relaxed">
+                  <li>کلیک ل سەر دوگمەیا <span className="text-indigo-700 font-extrabold">"داگرتنا وێنەیێ شاشەیا قوفلێ"</span> بکە دا وێنە بچیتە ناڤ گالەریا مۆبایلێ (Gallery).</li>
+                  <li>د ناڤ مۆبایلا خۆ دا بچە سەر **گالەری (Photos)** و ئەو وێنەیە ڤەکە.</li>
+                  <li>کلیک ل سەر سێ خاڵان بکە و هەڵبژێرە: **Set as Wallpaper / Lock Screen** (دانان وەک شاشەی قفل).</li>
+                </ol>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  onClick={downloadWallpaperImage}
+                  className="flex-1 py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-black text-xs shadow-lg transition-all flex items-center justify-center gap-2"
+                >
+                  <Download className="w-5 h-5" />
+                  <span>داگرتنا وێنەیێ شاشەیا قوفلێ (HD PNG)</span>
+                </button>
+                <button
+                  onClick={() => setShowWallpaperModal(false)}
+                  className="py-4 px-6 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
+                >
+                  داخستن
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -2082,17 +2437,20 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Install App Button (PWA) */}
-            {!isStandalone && (
-              <button
-                onClick={triggerInstallApp}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-black border border-emerald-200 transition-all shadow-sm active:scale-95"
-                title="دابەزاندنا بەرنامەی وەک ئەپ بۆ سەر مۆبایل و کۆمپیوتەر"
-              >
-                <Download className="w-3.5 h-3.5 text-emerald-600" />
-                <span>دابەزاندنا ئەپێ</span>
-              </button>
-            )}
+            {/* Lock Screen Wallpaper Export Button */}
+            <button
+              onClick={() => {
+                setShowWallpaperModal(true);
+                if ("Notification" in window && Notification.permission !== "granted") {
+                  Notification.requestPermission();
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-cyan-50 hover:bg-cyan-100 text-cyan-800 text-xs font-black border border-cyan-200 transition-all shadow-sm active:scale-95"
+              title="دروستکرنا ڕەسمێ شاشەیا قوفلا مۆبایلێ (Phone Lockscreen Wallpaper)"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-cyan-600" />
+              <span>شاشەیا قوفلێ</span>
+            </button>
 
             {/* Gemini Timetable Extractor Button */}
             <button
@@ -2436,17 +2794,84 @@ const App: React.FC = () => {
                     </div>
 
                     {editingSlotId === slot.id ? (
-                      <div className="space-y-3 animate-in slide-in-from-top-1 duration-200">
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-400 block mb-1">پۆل:</label>
+                      <div className="space-y-3 animate-in slide-in-from-top-1 duration-200 bg-slate-50/90 p-3 rounded-2xl border border-slate-200">
+                        {/* Grade & Section Selection */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-black text-slate-500 block">پۆل و هۆبە (قۆناغا 1 هەتا 12):</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            {/* Quick Grade Select */}
+                            <select
+                              onChange={(e) => {
+                                const selectedGrade = e.target.value;
+                                if (!selectedGrade) return;
+                                if (selectedGrade === 'بێ وانە') {
+                                  updateSlot(activeDay, slot.id, { className: 'بێ وانە' });
+                                  return;
+                                }
+                                const currentParts = slot.className.split(' - ');
+                                const currentHuba = currentParts.length > 1 ? currentParts[1] : 'أ';
+                                updateSlot(activeDay, slot.id, { className: `${selectedGrade} - ${currentHuba}` });
+                              }}
+                              className="text-xs border border-slate-200 bg-white rounded-xl p-2 font-bold outline-none"
+                              defaultValue=""
+                            >
+                              <option value="" disabled>هەلبژارتنا پۆلێ (1-12)</option>
+                              <option value="بێ وانە">بێ وانە (بەتاڵ)</option>
+                              {GRADES.map((g) => (
+                                <option key={g} value={g}>{g}</option>
+                              ))}
+                            </select>
+
+                            {/* Quick Section/Huba Select */}
+                            <select
+                              onChange={(e) => {
+                                const selectedHuba = e.target.value;
+                                if (!selectedHuba) return;
+                                const currentGrade = slot.className.includes(' - ')
+                                  ? slot.className.split(' - ')[0]
+                                  : (slot.className === 'بێ وانە' ? 'پۆلا 10' : slot.className);
+                                updateSlot(activeDay, slot.id, { className: `${currentGrade} - ${selectedHuba}` });
+                              }}
+                              className="text-xs border border-slate-200 bg-white rounded-xl p-2 font-bold outline-none"
+                              defaultValue=""
+                            >
+                              <option value="" disabled>هۆبە (أ، ب، ج...)</option>
+                              {SECTIONS.map((sec) => (
+                                <option key={sec} value={sec}>هۆبە: {sec}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Custom Class Name Text Input */}
                           <input
                             type="text"
                             value={slot.className}
                             onChange={(e) => updateSlot(activeDay, slot.id, { className: e.target.value })}
-                            placeholder="بۆ نموونە: 10 - ب یان ج"
-                            className="w-full text-xs border border-slate-200 bg-white rounded-xl p-2.5 outline-none font-bold"
+                            placeholder="یان بنڤیسە: بۆ نموونە 10 - ب"
+                            className="w-full text-xs border border-slate-200 bg-white rounded-xl p-2 outline-none font-bold"
+                            list="custom-classes-list"
                           />
+                          <datalist id="custom-classes-list">
+                            {CLASSES.map((c) => (
+                              <option key={c} value={c} />
+                            ))}
+                          </datalist>
                         </div>
+
+                        {/* Subject Selection */}
+                        <div>
+                          <label className="text-[10px] font-black text-slate-500 block mb-1">بابەت (وانە):</label>
+                          <select
+                            value={slot.subject || 'کیمیا'}
+                            onChange={(e) => updateSlot(activeDay, slot.id, { subject: e.target.value })}
+                            className="w-full text-xs border border-slate-200 bg-white rounded-xl p-2 font-bold outline-none"
+                          >
+                            {ALL_SUBJECTS.map((sub) => (
+                              <option key={sub} value={sub}>{sub}</option>
+                            ))}
+                          </select>
+                        </div>
+
                         <div className="grid grid-cols-2 gap-2">
                           <div>
                             <label className="text-[10px] font-bold text-slate-400 block mb-1">دەستپێک:</label>
@@ -2467,6 +2892,7 @@ const App: React.FC = () => {
                             />
                           </div>
                         </div>
+
                         <button
                           onClick={() => {
                             saveToLocal();
@@ -2480,17 +2906,27 @@ const App: React.FC = () => {
                       </div>
                     ) : (
                       <div onClick={() => setEditingSlotId(slot.id)} className="cursor-pointer">
-                        <h3
-                          className={`text-2xl font-black tracking-tight mb-3 ${
-                            status === 'finished'
-                              ? 'text-red-700'
-                              : status === 'active'
-                              ? 'text-green-700'
-                              : 'text-slate-800'
-                          }`}
-                        >
-                          {slot.className === 'بێ وانە' ? 'بەتاڵ (بێ وانە)' : `پۆلا ${slot.className}`}
-                        </h3>
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <h3
+                            className={`text-2xl font-black tracking-tight ${
+                              status === 'finished'
+                                ? 'text-red-700'
+                                : status === 'active'
+                                ? 'text-green-700'
+                                : 'text-slate-800'
+                            }`}
+                          >
+                            {slot.className === 'بێ وانە' ? 'بەتاڵ (بێ وانە)' : (slot.className.startsWith('پۆلا') ? slot.className : `پۆلا ${slot.className}`)}
+                          </h3>
+
+                          {slot.className !== 'بێ وانە' && (
+                            <span className="flex items-center gap-1 text-[11px] font-black px-2.5 py-1 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-xs">
+                              <GraduationCap className="w-3.5 h-3.5 text-indigo-500" />
+                              <span>{slot.subject || 'کیمیا'}</span>
+                            </span>
+                          )}
+                        </div>
+
                         <div
                           className={`flex items-center gap-2 p-3 rounded-xl border transition-colors ${
                             status === 'active' ? 'bg-green-100/60 border-green-200' : 'bg-slate-50 border-slate-100'
@@ -2719,10 +3155,10 @@ const App: React.FC = () => {
                                 {slot.className}
                               </div>
                               <div
-                                className="text-[10px] font-black absolute top-2 right-2 opacity-60"
+                                className="text-[10px] font-black absolute top-2 right-2 opacity-80 bg-slate-100 px-1.5 py-0.5 rounded-md"
                                 style={{ color: 'var(--primary-color)' }}
                               >
-                                کیمیا
+                                {slot.subject || 'کیمیا'}
                               </div>
                               <div className="text-[11px] text-slate-400 mt-1 font-mono tabular-nums bg-white/70 px-2 py-0.5 rounded-full border border-slate-100">
                                 {slot.startTime}

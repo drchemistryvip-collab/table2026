@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jadwal-v10-offline-pwa';
+const CACHE_NAME = 'jadwal-v11-offline-pwa';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -80,4 +80,39 @@ self.addEventListener('fetch', (event) => {
         });
       })
   );
+});
+
+// Handle background notification clicks on lockscreen or status bar
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow('./');
+      }
+    })
+  );
+});
+
+// Message listener from web app for triggering SW notifications
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'TRIGGER_ALARM_NOTIFICATION') {
+    const { title, body } = event.data;
+    self.registration.showNotification(title || 'ئاگاداریی جەتوەلا وانان', {
+      body: body || 'دەرس دەست پێ دکەت',
+      icon: './icon-192.png',
+      badge: './icon-192.png',
+      vibrate: [300, 100, 300, 100, 300, 100, 500],
+      tag: 'lesson-alarm-lockscreen',
+      renotify: true,
+      requireInteraction: true,
+      silent: false,
+      data: { url: './' }
+    });
+  }
 });

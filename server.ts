@@ -57,22 +57,23 @@ app.post("/api/gemini/extract-schedule", async (req, res) => {
     }
 
     const promptText = `
-You are an expert school timetable scanner and OCR analyzer specializing in Kurdish school schedules.
+You are an expert school timetable scanner and OCR analyzer specializing in Kurdish school schedules (Badini / Sorani).
 Look at this school timetable document/photo carefully.
 Extract:
 1. Teacher Name (e.g. "م حسین" or "ماموستا حسێن")
-2. Subject (e.g. "کیمیا" / Chemistry)
+2. Subject (e.g. "کیمیا", "فیزیا", "زیندەوەر", "بیرکاری", "زانست", "کوردی", "ئینگلێزی", "عەرەبی", "پەروەردەیا ئاینی", "کۆمپیوتەر", "مافێن مرۆڤی", "جێنۆساید", "وەرزش", "هونەر", "دەروونناسی", "کۆمەڵایەتی", "مێژوو", "جوگرافیا", "ئابووری", "فەلسەفە", etc.)
 3. The weekly schedule table:
+   Grades can range from Grade 1 to 12 (پۆلا 1 تا پۆلا 12) with sections A-Y (أ، ب، ج، د، هـ، و، ز، ح، ط...).
    The rows represent days (in Kurdish / Arabic):
-   - ئێکشەمبی (ئێک شەمبی)
-   - دووشەمبی (دوو شەمبی)
-   - سێشەمبی (سێ شەمبی)
-   - چوارشەمبی (چار شەمبی)
-   - پێنچ شەمبی (پێنج شەمبی)
-   The columns are lesson numbers: 1, 2, 3, 4, 5, 6 (or up to 7).
-   For each cell, extract the class/grade name (e.g. "10 - ب", "10 - ج", "10 - د", "10 - هـ", "10 - و", etc.).
+   - ئێکشەمبی
+   - دووشەمبی
+   - سێشەمبی
+   - چوارشەمبی
+   - پێنچ شەمبی
+   The columns are lesson numbers: 1, 2, 3, 4, 5, 6 (or up to 8).
+   For each cell, extract the class/grade/section name (e.g. "10 - ب", "پۆلا 1 - أ", "پۆلا 12 - زانستی أ", etc.).
    If a cell is blank or empty, write "بێ وانە".
-   Also note whether the shift seems to be morning ("morning") or evening ("evening") if indicated or standard.
+   Also note whether the shift seems to be morning ("morning") or evening ("evening").
 
 Return ONLY a valid JSON object following this schema:
 {
