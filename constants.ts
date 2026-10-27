@@ -1,6 +1,7 @@
 import { WeekSchedule, LessonSlot, ShiftType, AlarmSettings, DEFAULT_ALARM_SETTINGS } from './types';
 
 export const VOICE_SCRIPTS: Record<string, string> = {
+  'universal': "ماموستا حسێنێ بەرێز دەرس دەست پێ دکەت - هیڤیدارم بچنە پۆلێ دگەل رێزو سلاڤان.",
   'ب': "ماموستا حسێنێ بەرێز تە ڤێ دەرسێ پولا دەهێ با یا هەی.",
   'ج': "ماموستا حسێنێ بەرێز تە ڤێ دەرسێ پولا دەهێ جیم یا هەی.",
   'د': "ماموستا حسێنێ بەرێز تە ڤێ دەرسێ پولا دەهێ دال یا هەی.",

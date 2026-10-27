@@ -28,6 +28,8 @@ export interface ExamSettings {
 }
 
 export interface AlarmSettings {
+  useUniversalSound?: boolean;  // If true, plays a single bell/voice alert for ALL classes and subjects
+  universalScript?: string;     // Universal voice script e.g. "ماموستا حسێنێ بەرێز دەرس دەست پێ دکەت"
   minutesBeforeStart: number; // Offset for start of lesson
   minutesBeforeEnd: number;   // Offset for end of lesson
   soundUrl: string;
@@ -47,6 +49,8 @@ export interface AlarmSettings {
 }
 
 export const DEFAULT_ALARM_SETTINGS: AlarmSettings = {
+  useUniversalSound: false,
+  universalScript: "ماموستا حسێنێ بەرێز دەرس دەست پێ دکەت - هیڤیدارم بچنە پۆلێ دگەل رێزو سلاڤان",
   minutesBeforeStart: 2,
   minutesBeforeEnd: 5,
   soundUrl: 'https://assets.mixkit.co/active_storage/sfx/2558/2558-preview.mp3',

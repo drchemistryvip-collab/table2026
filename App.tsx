@@ -143,6 +143,11 @@ const App: React.FC = () => {
   const [showWallpaperModal, setShowWallpaperModal] = useState(false);
   const [wallpaperTheme, setWallpaperTheme] = useState<'indigo' | 'amoled' | 'emerald' | 'amber' | 'white'>('indigo');
   const [wallpaperMode, setWallpaperMode] = useState<'full' | 'today'>('full');
+  const [wallpaperTopY, setWallpaperTopY] = useState<number>(380);
+  const [wallpaperScale, setWallpaperScale] = useState<number>(1.0);
+  const [wallpaperSpacing, setWallpaperSpacing] = useState<number>(20);
+  const [wallpaperShowHeader, setWallpaperShowHeader] = useState<boolean>(true);
+  const [wallpaperShowFooter, setWallpaperShowFooter] = useState<boolean>(true);
   const wallpaperCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const toggleViewMode = () => setViewMode((prev) => (prev === 'modern' ? 'classic' : 'modern'));
@@ -656,23 +661,31 @@ const App: React.FC = () => {
     const cardBorder = isLight ? 'rgba(203, 213, 225, 0.8)' : 'rgba(255, 255, 255, 0.15)';
     const accentColor = wallpaperTheme === 'emerald' ? '#34d399' : wallpaperTheme === 'amber' ? '#fbbf24' : '#818cf8';
 
-    // Reserve top 22% space for mobile lockscreen clock widget
+    // Header Title (optional)
+    if (wallpaperShowHeader) {
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 30px Vazirmatn, sans-serif';
+      ctx.fillStyle = isLight ? '#64748b' : 'rgba(255, 255, 255, 0.4)';
+      ctx.fillText('⚡ جهـتوەلا من — شاشەیا قوفلێ', width / 2, 220);
+
+      ctx.font = '900 48px Vazirmatn, sans-serif';
+      ctx.fillStyle = textColor;
+      ctx.fillText('ماموستا حوسێن — کیمیا', width / 2, 280);
+
+      ctx.font = '700 28px Vazirmatn, sans-serif';
+      ctx.fillStyle = accentColor;
+      ctx.fillText('جەتوەلا وانێن قوتابخانێ (2026)', width / 2, 325);
+      ctx.restore();
+    }
+
+    // Apply scale & vertical top offset transformation
     ctx.save();
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 30px Vazirmatn, sans-serif';
-    ctx.fillStyle = isLight ? '#64748b' : 'rgba(255, 255, 255, 0.4)';
-    ctx.fillText('⚡ جهـتوەلا من — شاشەیا قوفلێ', width / 2, 420);
+    ctx.translate(width / 2, wallpaperTopY);
+    ctx.scale(wallpaperScale, wallpaperScale);
+    ctx.translate(-width / 2, -wallpaperTopY);
 
-    ctx.font = '900 50px Vazirmatn, sans-serif';
-    ctx.fillStyle = textColor;
-    ctx.fillText('ماموستا حوسێن — کیمیا', width / 2, 490);
-
-    ctx.font = '700 30px Vazirmatn, sans-serif';
-    ctx.fillStyle = accentColor;
-    ctx.fillText('جەتوەلا وانێن قوتابخانێ (2026)', width / 2, 540);
-    ctx.restore();
-
-    let startY = 600;
+    let startY = wallpaperTopY;
 
     if (wallpaperMode === 'today') {
       const todayData = schedule[activeDay] || schedule[DAYS[0]];
@@ -724,7 +737,7 @@ const App: React.FC = () => {
         ctx.fillText(`${slot.subject || 'کیمیا'}  •  ⏰ ${slot.startTime} — ${slot.endTime}`, cardX + cardW - 35, startY + 118);
 
         ctx.restore();
-        startY += cardH + 20;
+        startY += cardH + wallpaperSpacing;
       });
 
     } else {
@@ -734,7 +747,7 @@ const App: React.FC = () => {
 
         const cardX = 50;
         const cardW = width - 100;
-        const cardH = 210;
+        const cardH = 200;
 
         ctx.save();
         ctx.beginPath();
@@ -747,16 +760,16 @@ const App: React.FC = () => {
         ctx.stroke();
 
         ctx.textAlign = 'right';
-        ctx.font = '900 36px Vazirmatn, sans-serif';
+        ctx.font = '900 34px Vazirmatn, sans-serif';
         ctx.fillStyle = accentColor;
-        ctx.fillText(`• ${dayName} (${dayData.shift === 'morning' ? 'سپێدە' : 'هێڤاری'})`, cardX + cardW - 25, startY + 50);
+        ctx.fillText(`• ${dayName} (${dayData.shift === 'morning' ? 'سپێدە' : 'هێڤاری'})`, cardX + cardW - 25, startY + 48);
 
         const slotCount = dayData.slots.length || 6;
         const slotWidth = (cardW - 50) / slotCount;
 
         dayData.slots.forEach((slot, sIdx) => {
           const sx = cardX + 25 + sIdx * slotWidth;
-          const sy = startY + 75;
+          const sy = startY + 70;
 
           ctx.beginPath();
           if ((ctx as any).roundRect) (ctx as any).roundRect(sx, sy, slotWidth - 10, 110, 16);
@@ -782,16 +795,21 @@ const App: React.FC = () => {
         });
 
         ctx.restore();
-        startY += cardH + 20;
+        startY += cardH + wallpaperSpacing;
       });
     }
 
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.font = '700 28px Vazirmatn, sans-serif';
-    ctx.fillStyle = subTextColor;
-    ctx.fillText('📱 بەرنامەیێ جەتوەلا من — م. حوسێن | 2026', width / 2, height - 60);
-    ctx.restore();
+    ctx.restore(); // Restore scale translation
+
+    // Optional Footer Badge
+    if (wallpaperShowFooter) {
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.font = '700 28px Vazirmatn, sans-serif';
+      ctx.fillStyle = subTextColor;
+      ctx.fillText('📱 بەرنامەیێ جەتوەلا من — م. حوسێن | 2026', width / 2, height - 60);
+      ctx.restore();
+    }
   };
 
   const downloadWallpaperImage = () => {
@@ -810,7 +828,18 @@ const App: React.FC = () => {
         renderWallpaperCanvas();
       }, 150);
     }
-  }, [showWallpaperModal, wallpaperTheme, wallpaperMode, schedule, activeDay]);
+  }, [
+    showWallpaperModal,
+    wallpaperTheme,
+    wallpaperMode,
+    wallpaperTopY,
+    wallpaperScale,
+    wallpaperSpacing,
+    wallpaperShowHeader,
+    wallpaperShowFooter,
+    schedule,
+    activeDay
+  ]);
 
   // Bell scheduling loop
   useEffect(() => {
@@ -844,12 +873,23 @@ const App: React.FC = () => {
           const key = `${slot.id}-start-${triggerTimeStartStr}`;
           if (lastTriggeredRef.current !== key) {
             lastTriggeredRef.current = key;
-            const msg =
-              customScripts[slot.className] ||
-              `ماموستا حسێنێ بەرێز دەرس دەست پێ دکەت - پۆلا ${slot.className}`;
-            setActiveAlarm({ title: "دەرس دەست پێ دکەت", msg: msg });
-            playOfflineVoice(slot.className, alarmSettings.repeatCount);
-            sendNotification("ئاگاداری - دەستپێکرنا وانێ", msg);
+            const isUniversal = alarmSettings.useUniversalSound;
+            const msg = isUniversal
+              ? (alarmSettings.universalScript || customScripts['universal'] || `ماموستا حسێنێ بەرێز دەرس دەست پێ دکەت - پۆلا ${slot.className}`)
+              : (customScripts[slot.className] || `ماموستا حسێنێ بەرێز دەرس دەست پێ دکەت - پۆلا ${slot.className}`);
+
+            setActiveAlarm({ title: `دەستپێکرنا دەرسا ${slot.className}`, msg: msg });
+
+            if (isUniversal) {
+              // Try playing universal offline voice first, fallback to class voice
+              playOfflineVoice('universal', alarmSettings.repeatCount).then((played) => {
+                if (!played) playOfflineVoice(slot.className, alarmSettings.repeatCount);
+              });
+            } else {
+              playOfflineVoice(slot.className, alarmSettings.repeatCount);
+            }
+
+            sendNotification(`ئاگاداری - وانێ ${slot.className}`, msg);
           }
         }
 
@@ -1299,56 +1339,132 @@ const App: React.FC = () => {
             {/* Modal Content */}
             <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto no-scrollbar">
               {/* Controls */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-3xl border border-slate-200">
-                {/* Mode Selector */}
-                <div>
-                  <label className="text-xs font-black text-slate-700 block mb-2">ناڤەرۆکا ڕەسمی:</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => setWallpaperMode('full')}
-                      className={`py-2.5 px-3 rounded-2xl text-xs font-black border transition-all ${
-                        wallpaperMode === 'full'
-                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
-                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      خشتەیێ هەمی هەفتێ
-                    </button>
-                    <button
-                      onClick={() => setWallpaperMode('today')}
-                      className={`py-2.5 px-3 rounded-2xl text-xs font-black border transition-all ${
-                        wallpaperMode === 'today'
-                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
-                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      جەتوەلا ئەڤڕۆ ({activeDay})
-                    </button>
+              <div className="space-y-4 bg-slate-50 p-4 rounded-3xl border border-slate-200">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Mode Selector */}
+                  <div>
+                    <label className="text-xs font-black text-slate-700 block mb-1.5">ناڤەرۆکا ڕەسمی:</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => setWallpaperMode('full')}
+                        className={`py-2 px-3 rounded-2xl text-xs font-black border transition-all ${
+                          wallpaperMode === 'full'
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        خشتەیێ هەمی هەفتێ
+                      </button>
+                      <button
+                        onClick={() => setWallpaperMode('today')}
+                        className={`py-2 px-3 rounded-2xl text-xs font-black border transition-all ${
+                          wallpaperMode === 'today'
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        جەتوەلا ئەڤڕۆ ({activeDay})
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Theme Selector */}
+                  <div>
+                    <label className="text-xs font-black text-slate-700 block mb-1.5">ڕەنگ و ستایلێ بکگراوەندێ:</label>
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                      {[
+                        { id: 'indigo', label: 'شین', bg: 'bg-indigo-900', text: 'text-white' },
+                        { id: 'amoled', label: 'ڕەش (AMOLED)', bg: 'bg-black', text: 'text-white' },
+                        { id: 'emerald', label: 'کەسک', bg: 'bg-emerald-900', text: 'text-white' },
+                        { id: 'amber', label: 'پرتەقاڵی', bg: 'bg-amber-900', text: 'text-white' },
+                        { id: 'white', label: 'سپی', bg: 'bg-slate-100 border-slate-300', text: 'text-slate-800' },
+                      ].map((t) => (
+                        <button
+                          key={t.id}
+                          onClick={() => setWallpaperTheme(t.id as any)}
+                          className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold border transition-all flex items-center gap-1 flex-shrink-0 ${t.bg} ${t.text} ${
+                            wallpaperTheme === t.id ? 'ring-2 ring-indigo-500 ring-offset-2 scale-105' : 'opacity-80'
+                          }`}
+                        >
+                          <span>{t.label}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
-                {/* Theme Selector */}
-                <div>
-                  <label className="text-xs font-black text-slate-700 block mb-2">ڕەنگ و ستایلێ بکگراوەندێ:</label>
-                  <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
-                    {[
-                      { id: 'indigo', label: 'شین', bg: 'bg-indigo-900', text: 'text-white' },
-                      { id: 'amoled', label: 'ڕەش (AMOLED)', bg: 'bg-black', text: 'text-white' },
-                      { id: 'emerald', label: 'کەسک', bg: 'bg-emerald-900', text: 'text-white' },
-                      { id: 'amber', label: 'پرتەقاڵی', bg: 'bg-amber-900', text: 'text-white' },
-                      { id: 'white', label: 'سپی زێڕین', bg: 'bg-slate-100 border-slate-300', text: 'text-slate-800' },
-                    ].map((t) => (
-                      <button
-                        key={t.id}
-                        onClick={() => setWallpaperTheme(t.id as any)}
-                        className={`px-3 py-2 rounded-xl text-[11px] font-bold border transition-all flex items-center gap-1.5 flex-shrink-0 ${t.bg} ${t.text} ${
-                          wallpaperTheme === t.id ? 'ring-2 ring-indigo-500 ring-offset-2 scale-105' : 'opacity-80'
-                        }`}
-                      >
-                        <span>{t.label}</span>
-                      </button>
-                    ))}
+                {/* Fine-Tuning Sliders for Clock Alignment */}
+                <div className="pt-3 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  {/* Top Y Offset Slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between font-bold text-slate-600">
+                      <span>شوێنی دەستپێک (سەرەوە):</span>
+                      <span className="font-black text-indigo-600">{wallpaperTopY}px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="200"
+                      max="650"
+                      value={wallpaperTopY}
+                      onChange={(e) => setWallpaperTopY(parseInt(e.target.value))}
+                      className="w-full accent-indigo-600"
+                    />
                   </div>
+
+                  {/* Scale Slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between font-bold text-slate-600">
+                      <span>قەبارە / حەجم (Scale):</span>
+                      <span className="font-black text-indigo-600">{Math.round(wallpaperScale * 100)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="70"
+                      max="130"
+                      value={Math.round(wallpaperScale * 100)}
+                      onChange={(e) => setWallpaperScale(parseInt(e.target.value) / 100)}
+                      className="w-full accent-indigo-600"
+                    />
+                  </div>
+
+                  {/* Row Spacing Slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between font-bold text-slate-600">
+                      <span>دووری ڕێزەکان (Spacing):</span>
+                      <span className="font-black text-indigo-600">{wallpaperSpacing}px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="5"
+                      max="50"
+                      value={wallpaperSpacing}
+                      onChange={(e) => setWallpaperSpacing(parseInt(e.target.value))}
+                      className="w-full accent-indigo-600"
+                    />
+                  </div>
+                </div>
+
+                {/* Show/Hide Header & Footer Toggles */}
+                <div className="pt-2 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs font-bold text-slate-700">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={wallpaperShowHeader}
+                      onChange={(e) => setWallpaperShowHeader(e.target.checked)}
+                      className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span>نیشاندانی ناڤ و سەردێڕی سەرەوە</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={wallpaperShowFooter}
+                      onChange={(e) => setWallpaperShowFooter(e.target.checked)}
+                      className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span>نیشاندانی ناڤنیشانی ژێرەوە</span>
+                  </label>
                 </div>
               </div>
 
@@ -2104,6 +2220,87 @@ const App: React.FC = () => {
               {/* TAB 4: BELL & VOICES */}
               {settingsActiveTab === 'voice' && (
                 <div className="space-y-6">
+                  {/* Master Universal Bell Sound Toggle Card */}
+                  <div className="p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-3xl border-2 border-emerald-200 shadow-sm space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 bg-emerald-600 text-white rounded-2xl shadow-md">
+                          <Bell className="w-6 h-6 animate-ring" />
+                        </div>
+                        <div>
+                          <h4 className="font-black text-sm text-emerald-950">دەنگێ گشتی / جەرەسێ قوتابخانێ بۆ هەمی وانان</h4>
+                          <p className="text-[11px] text-emerald-700 font-medium">ئێک دەنگ و زەنگ بۆ هەمی پۆل و بابەتان پێکڤە (یەکپارچە)</p>
+                        </div>
+                      </div>
+
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={alarmSettings.useUniversalSound || false}
+                          onChange={(e) => {
+                            const updated = { ...alarmSettings, useUniversalSound: e.target.checked };
+                            setAlarmSettings(updated);
+                            localStorage.setItem('alarm_settings_v9', JSON.stringify(updated));
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                      </label>
+                    </div>
+
+                    {/* Universal Sound Script & Action Buttons */}
+                    <div className="pt-3 border-t border-emerald-200/80 space-y-3">
+                      <label className="text-[11px] font-black text-emerald-900 block">دەقێ ئاگەهداریا گشتی (Universal Voice Script):</label>
+                      <textarea
+                        value={alarmSettings.universalScript || customScripts['universal'] || "ماموستا حسێنێ بەرێز دەرس دەست پێ دکەت - هیڤیدارم بچنە پۆلێ دگەل رێزو سلاڤان"}
+                        onChange={(e) => {
+                          const newScript = e.target.value;
+                          setAlarmSettings((p) => ({ ...p, universalScript: newScript }));
+                          updateScript('universal', newScript);
+                        }}
+                        placeholder="دەقێ دەنگی بنڤیسە..."
+                        className="w-full text-xs p-3 bg-white border border-emerald-200 rounded-2xl outline-none font-medium leading-relaxed text-slate-800"
+                        rows={2}
+                      />
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => generateAndStoreVoice('universal', alarmSettings.universalScript || customScripts['universal'] || "ماموستا حسێنێ بەرێز دەرس دەست پێ دکەت")}
+                          disabled={generatingId !== null}
+                          className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50"
+                        >
+                          {generatingId === 'universal' ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Sparkles className="w-4 h-4 text-yellow-300" />
+                          )}
+                          <span>دروستکرنا دەنگێ گشتی (Gemini AI)</span>
+                        </button>
+
+                        {readyVoices.includes('universal') && (
+                          <button
+                            onClick={() => playOfflineVoice('universal', 1)}
+                            className="p-2.5 bg-white text-emerald-700 hover:bg-emerald-100 rounded-xl border border-emerald-300 font-bold text-xs shadow-xs flex items-center gap-1.5 active:scale-95 transition-all"
+                            title="تاقیکرنا دەنگی"
+                          >
+                            <Play className="w-4 h-4 text-emerald-600" />
+                            <span>تاقیکرن</span>
+                          </button>
+                        )}
+
+                        <label className="p-2.5 bg-white hover:bg-emerald-100 text-emerald-700 rounded-xl border border-emerald-300 font-bold text-xs cursor-pointer shadow-xs flex items-center gap-1.5 transition-all">
+                          <Upload className="w-4 h-4 text-emerald-600" />
+                          <span>بارکرنا فایلی MP3</span>
+                          <input
+                            type="file"
+                            accept="audio/*"
+                            className="hidden"
+                            onChange={(e) => e.target.files && handleFileUpload('universal', e.target.files[0])}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
                   {/* Alarm Offset Sliders */}
                   <div className="space-y-4 p-4 bg-slate-50 rounded-2xl border border-slate-200">
                     <h3 className="text-xs font-black text-slate-700 flex items-center gap-1.5">
