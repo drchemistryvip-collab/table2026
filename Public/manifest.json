@@ -1,29 +1,29 @@
 {
-  "id": "/",
+  "id": "./",
   "name": "جەتوەلا من - ماموستا حوسێن",
   "short_name": "جەتوەلا من",
   "description": "بەرنامەکێ پێشکەفتی بۆ ڕێکخستنا جەتوەلا وانێن روژانە ب تایبەتی بۆ ماموستایێن کیمیایێ.",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#4f46e5",
   "orientation": "portrait",
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "./icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon-512.png",
+      "src": "./icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon-512.png",
+      "src": "./icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

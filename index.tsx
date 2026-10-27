@@ -5,7 +5,7 @@ import App from './App';
 // Register Service Worker for Offline support and auto-refresh on new deployment
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').then(registration => {
+    navigator.serviceWorker.register('./sw.js').then(registration => {
       // Force check for latest version on reload
       registration.update();
 
