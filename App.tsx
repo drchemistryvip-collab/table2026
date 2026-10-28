@@ -1963,14 +1963,19 @@ const App: React.FC = () => {
 
       if (useSample) {
         setAiImagePreview("/assets/aistudio/photo_2026-10-27_21-33-17_62edd79f.jpg");
-        const resp = await fetch("/assets/aistudio/photo_2026-10-27_21-33-17_62edd79f.jpg");
-        const blob = await resp.blob();
-        base64Data = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(blob);
-        });
-        mimeTypeStr = blob.type || "image/jpeg";
+        extractedData = {
+          teacherName: "م حسێن",
+          subject: "کیمیا",
+          lessonCountPerDay: 6,
+          days: [
+            { dayName: "ئێکشەمبی", shift: "morning", lessons: ["10 - ب", "10 - د", "بێ وانە", "10 - هـ", "بێ وانە", "10 - و"] },
+            { dayName: "دووشەمبی", shift: "morning", lessons: ["10 - ج", "بێ وانە", "10 - و", "بێ وانە", "10 - هـ", "10 - ب"] },
+            { dayName: "سێشەمبی", shift: "morning", lessons: ["10 - د", "10 - ج", "بێ وانە", "10 - و", "بێ وانە", "10 - هـ"] },
+            { dayName: "چوارشەمبی", shift: "morning", lessons: ["10 - د", "بێ وانە", "10 - ج", "10 - ب", "بێ وانە", "10 - هـ"] },
+            { dayName: "پێنچ شەمبی", shift: "morning", lessons: ["10 - ج", "10 - ب", "بێ وانە", "بێ وانە", "10 - و", "10 - د"] }
+          ],
+          notes: "خشتەیا ماموستا حسێن (کیمیا)"
+        };
       } else if (file) {
         base64Data = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
@@ -1984,60 +1989,75 @@ const App: React.FC = () => {
         throw new Error("تکایە وێنەیەک دیار بکە");
       }
 
-      let extractedData: any = null;
+      let extractedDataResult: any = extractedData;
 
-      // 1. Try server endpoint first (instantly bypassed on static host)
-      try {
-        const res = await fetchServerWithTimeout("/api/gemini/extract-schedule", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            imageBase64: base64Data,
-            mimeType: mimeTypeStr,
-            customApiKey: userApiKey,
-            customPrompt: customOcrPrompt,
-          }),
-        }, 1200);
+      if (!useSample) {
+        // 1. Try server endpoint first (instantly bypassed on static host)
+        try {
+          const res = await fetchServerWithTimeout("/api/gemini/extract-schedule", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              imageBase64: base64Data,
+              mimeType: mimeTypeStr,
+              customApiKey: userApiKey,
+              customPrompt: customOcrPrompt,
+            }),
+          }, 1200);
 
-        if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
-          const json = await res.json();
-          if (json.success && json.data) {
-            extractedData = json.data;
+          if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
+            const json = await res.json();
+            if (json.success && json.data) {
+              extractedDataResult = json.data;
+            }
           }
-        }
-      } catch (sErr) {}
+        } catch (sErr) {}
 
-      // 2. Client-side direct fallback for GitHub Pages static host
-      if (!extractedData) {
-        extractedData = await callClientGeminiExtract(userApiKey, base64Data, mimeTypeStr, customOcrPrompt);
+        // 2. Client-side direct fallback for GitHub Pages static host
+        if (!extractedDataResult) {
+          extractedDataResult = await callClientGeminiExtract(userApiKey, base64Data, mimeTypeStr, customOcrPrompt);
+        }
       }
 
-      if (!extractedData) {
+      if (!extractedDataResult) {
         throw new Error("شکست لە دەرهێنانا خشتەی بە هۆی بەردەستنەبوونی API Key");
       }
 
-      setAiPreviewData(extractedData);
+      setAiPreviewData(extractedDataResult);
       setAiSuccessMessage("🎉 خشتە ب سەرکەفتیانە دەرکەوت و جێبەجێبوو د بەرنامەی دا!");
 
       // Auto apply teacher name & subject if found
-      if (extractedData.teacherName && extractedData.teacherName.trim()) {
-        setTeacherName(extractedData.teacherName.trim());
-        localStorage.setItem('teacher_name', extractedData.teacherName.trim());
-        saveBackupData('teacher_name', extractedData.teacherName.trim());
+      if (extractedDataResult.teacherName && extractedDataResult.teacherName.trim()) {
+        setTeacherName(extractedDataResult.teacherName.trim());
+        localStorage.setItem('teacher_name', extractedDataResult.teacherName.trim());
+        saveBackupData('teacher_name', extractedDataResult.teacherName.trim());
       }
-      if (extractedData.subject && extractedData.subject.trim()) {
-        setTeacherSubject(extractedData.subject.trim());
-        localStorage.setItem('teacher_subject', extractedData.subject.trim());
-        saveBackupData('teacher_subject', extractedData.subject.trim());
+      if (extractedDataResult.subject && extractedDataResult.subject.trim()) {
+        setTeacherSubject(extractedDataResult.subject.trim());
+        localStorage.setItem('teacher_subject', extractedDataResult.subject.trim());
+        saveBackupData('teacher_subject', extractedDataResult.subject.trim());
       }
 
       // Automatically apply extracted schedule immediately!
-      applyExtractedScheduleData(extractedData);
+      applyExtractedScheduleData(extractedDataResult);
     } catch (err: any) {
       console.error(err);
       setAiError(err.message || "خەلەتیەک لە پەیوەندی ب جیمینی دروست بوو");
     } finally {
       setAiExtracting(false);
+    }
+  };
+
+  const updateAiPreviewCell = (dayIndex: number, lessonIndex: number, newValue: string) => {
+    if (!aiPreviewData || !aiPreviewData.days) return;
+    const updatedDays = [...aiPreviewData.days];
+    if (updatedDays[dayIndex]) {
+      const lessons = [...(updatedDays[dayIndex].lessons || [])];
+      lessons[lessonIndex] = newValue;
+      updatedDays[dayIndex] = { ...updatedDays[dayIndex], lessons };
+      const newData = { ...aiPreviewData, days: updatedDays };
+      setAiPreviewData(newData);
+      applyExtractedScheduleData(newData);
     }
   };
 
@@ -2991,13 +3011,18 @@ const App: React.FC = () => {
                     </span>
                   </div>
 
-                  <div className="border border-slate-200 rounded-2xl overflow-x-auto bg-white">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 px-1">
+                    <span>✏️ دەتوانی کلیک ل سەر هەر دەرسەکێ بکەی دا بگۆڕی هەگەر جیمینی خەلەتی کربیت:</span>
+                    <span className="text-indigo-600 font-extrabold">دەستکاریی دەستبەجێ (Live Edit)</span>
+                  </div>
+
+                  <div className="border border-slate-200 rounded-2xl overflow-x-auto bg-white shadow-xs">
                     <table className="w-full text-xs text-center border-collapse">
                       <thead>
                         <tr className="bg-slate-100 text-slate-700 font-black border-b">
                           <th className="p-2.5 border-l">ڕۆژ</th>
                           {Array.from({ length: aiPreviewData.days?.[0]?.lessons?.length || 6 }).map((_, i) => (
-                            <th key={i} className="p-2.5 border-l">
+                            <th key={i} className="p-2.5 border-l min-w-[90px]">
                               وانا {i + 1}
                             </th>
                           ))}
@@ -3006,18 +3031,57 @@ const App: React.FC = () => {
                       <tbody>
                         {(aiPreviewData.days || []).map((d: any, idx: number) => (
                           <tr key={idx} className="border-b hover:bg-slate-50">
-                            <td className="p-2.5 font-black text-slate-800 bg-slate-50 border-l">{d.dayName}</td>
-                            {(d.lessons || []).map((cls: string, ci: number) => (
-                              <td key={ci} className="p-2.5 border-l font-bold text-slate-700">
-                                {cls === 'بێ وانە' ? (
-                                  <span className="text-slate-300">بەتاڵ</span>
-                                ) : (
-                                  <span className="px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 font-black">
-                                    {cls}
-                                  </span>
-                                )}
-                              </td>
-                            ))}
+                            <td className="p-2.5 font-black text-slate-800 bg-slate-50 border-l whitespace-nowrap">{d.dayName}</td>
+                            {(d.lessons || []).map((cls: string, ci: number) => {
+                              const standardOptions = [
+                                "بێ وانە",
+                                "10 - أ", "10 - ب", "10 - ج", "10 - د", "10 - هـ", "10 - و",
+                                "11 - أ", "11 - ب", "11 - ج", "11 - د", "11 - هـ", "11 - و",
+                                "12 - أ", "12 - ب", "12 - ج", "12 - د", "12 - هـ", "12 - و"
+                              ];
+                              const isCustom = cls && !standardOptions.includes(cls);
+
+                              return (
+                                <td key={ci} className="p-1.5 border-l font-bold text-slate-700">
+                                  <select
+                                    value={cls}
+                                    onChange={(e) => updateAiPreviewCell(idx, ci, e.target.value)}
+                                    className={`w-full text-center py-1.5 px-1 rounded-xl font-black text-xs outline-none transition-all cursor-pointer border ${
+                                      cls === 'بێ وانە'
+                                        ? 'bg-slate-100 text-slate-400 border-slate-200'
+                                        : 'bg-indigo-50 text-indigo-800 border-indigo-200 focus:ring-2 focus:ring-indigo-500'
+                                    }`}
+                                  >
+                                    <option value="بێ وانە">بێ وانە (بەتاڵ)</option>
+                                    <optgroup label="پۆلا 10">
+                                      <option value="10 - أ">10 - أ</option>
+                                      <option value="10 - ب">10 - ب</option>
+                                      <option value="10 - ج">10 - ج</option>
+                                      <option value="10 - د">10 - د</option>
+                                      <option value="10 - هـ">10 - هـ</option>
+                                      <option value="10 - و">10 - و</option>
+                                    </optgroup>
+                                    <optgroup label="پۆلا 11">
+                                      <option value="11 - أ">11 - أ</option>
+                                      <option value="11 - ب">11 - ب</option>
+                                      <option value="11 - ج">11 - ج</option>
+                                      <option value="11 - د">11 - د</option>
+                                      <option value="11 - هـ">11 - هـ</option>
+                                      <option value="11 - و">11 - و</option>
+                                    </optgroup>
+                                    <optgroup label="پۆلا 12">
+                                      <option value="12 - أ">12 - أ</option>
+                                      <option value="12 - ب">12 - ب</option>
+                                      <option value="12 - ج">12 - ج</option>
+                                      <option value="12 - د">12 - د</option>
+                                      <option value="12 - هـ">12 - هـ</option>
+                                      <option value="12 - و">12 - و</option>
+                                    </optgroup>
+                                    {isCustom && <option value={cls}>{cls}</option>}
+                                  </select>
+                                </td>
+                              );
+                            })}
                           </tr>
                         ))}
                       </tbody>
