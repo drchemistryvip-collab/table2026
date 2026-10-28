@@ -16,9 +16,12 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // Helper function to get GoogleGenAI client with optionally provided custom API key
 function getAIClient(customApiKey?: string) {
-  const key = (customApiKey && customApiKey.trim() !== "") ? customApiKey.trim() : process.env.GEMINI_API_KEY;
+  let raw = (customApiKey && customApiKey.trim() !== "") ? customApiKey.trim() : process.env.GEMINI_API_KEY;
+  if (raw) {
+    raw = raw.replace(/^["']|["']$/g, '').trim();
+  }
   return new GoogleGenAI({
-    apiKey: key,
+    apiKey: raw,
     httpOptions: {
       headers: {
         "User-Agent": "aistudio-build",

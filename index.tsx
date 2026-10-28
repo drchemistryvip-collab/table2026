@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import './index.css';
 
 // Register Service Worker for Offline support and auto-refresh on new deployment
 if ('serviceWorker' in navigator) {

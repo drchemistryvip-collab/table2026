@@ -2484,7 +2484,7 @@ const App: React.FC = () => {
                           handleSaveApiKey(e.target.value);
                           setKeyValidationStatus(null);
                         }}
-                        placeholder="AIzaSy... (API Key یێ خۆ لێرە کۆپی پاست بکە)"
+                        placeholder="AQ... یان AIzaSy... (API Key یێ خۆ لێرە کۆپی پاست بکە)"
                         className="w-full text-xs p-3 pr-10 bg-black/40 border border-purple-400/40 rounded-2xl text-white font-mono placeholder:text-slate-400 outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition-all"
                       />
                       <button

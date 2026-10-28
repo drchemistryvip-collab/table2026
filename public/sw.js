@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jadwal-v11-offline-pwa';
+const CACHE_NAME = 'jadwal-v12-offline-pwa';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -47,38 +47,37 @@ self.addEventListener('fetch', (event) => {
   const isNavigation = event.request.mode === 'navigate';
 
   event.respondWith(
-    fetch(event.request)
-      .then((networkResponse) => {
-        // Cache valid responses
-        if (networkResponse && networkResponse.status === 200) {
-          const clone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, clone);
+    caches.match(event.request).then((cachedResponse) => {
+      // If we are offline or have a cached static asset, use cached first or fetch network in background
+      const fetchPromise = fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const clone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, clone);
+            });
+          }
+          return networkResponse;
+        })
+        .catch(async () => {
+          if (cachedResponse) return cachedResponse;
+          if (isNavigation) {
+            const fallback =
+              (await caches.match('./index.html')) ||
+              (await caches.match('./')) ||
+              (await caches.match('index.html')) ||
+              (await caches.match('/'));
+            if (fallback) return fallback;
+          }
+          return new Response('تۆ بێ ئینتەرنێتی، لێ زانیاریێن سەیڤکری د بەرنامەی دا بەردەستن.', {
+            status: 503,
+            statusText: 'Offline',
+            headers: { 'Content-Type': 'text/plain; charset=utf-8' }
           });
-        }
-        return networkResponse;
-      })
-      .catch(async () => {
-        // Offline fallback
-        const cached = await caches.match(event.request);
-        if (cached) return cached;
-
-        // If user navigates or refreshes while offline
-        if (isNavigation) {
-          const fallback =
-            (await caches.match('./index.html')) ||
-            (await caches.match('./')) ||
-            (await caches.match('index.html')) ||
-            (await caches.match('/'));
-          if (fallback) return fallback;
-        }
-
-        return new Response('تۆ بێ ئینتەرنێتی، لێ زانیاریێن سەیڤکری د بەرنامەی دا بەردەستن.', {
-          status: 503,
-          statusText: 'Offline',
-          headers: { 'Content-Type': 'text/plain; charset=utf-8' }
         });
-      })
+
+      return cachedResponse || fetchPromise;
+    })
   );
 });
 
