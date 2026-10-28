@@ -89,11 +89,36 @@ const getVoice = async (id: string): Promise<Uint8Array | null> => {
   return new Promise((resolve) => (request.onsuccess = () => resolve(request.result || null)));
 };
 
+const getKurdishDayName = (date: Date = new Date()): string => {
+  const day = date.getDay(); // 0: Sunday, 1: Monday, 2: Tuesday, 3: Wednesday, 4: Thursday, 5: Friday, 6: Saturday
+  switch (day) {
+    case 0: return 'ئێکشەمبی';
+    case 1: return 'دووشەمبی';
+    case 2: return 'سێشەمبی';
+    case 3: return 'چوارشەمبی';
+    case 4: return 'پێنچ شەمبی';
+    case 5: return 'ئێکشەمبی'; // Friday (Weekend) -> default to Sunday
+    case 6: return 'ئێکشەمبی'; // Saturday (Weekend) -> default to Sunday
+    default: return 'ئێکشەمبی';
+  }
+};
+
+const getFormattedFullKurdishDate = (date: Date = new Date()): string => {
+  const kurdishMonths = [
+    'کانوونی دووەم', 'شوبات', 'ئازار', 'نیسان', 'ئایار', 'حوزەیران',
+    'تەممووز', 'ئاب', 'ئەیلوول', 'تشرینی یەکەم', 'تشرینی دووەم', 'کانوونی یەکەم'
+  ];
+  const dayName = getKurdishDayName(date);
+  const dayNum = date.getDate();
+  const monthName = kurdishMonths[date.getMonth()];
+  const yearNum = date.getFullYear();
+
+  return `${dayName}، ${dayNum}ی ${monthName} ${yearNum}`;
+};
+
 const App: React.FC = () => {
   const [schedule, setSchedule] = useState<WeekSchedule>(INITIAL_SCHEDULE);
-  const [activeDay, setActiveDay] = useState<string>(
-    DAYS[new Date().getDay() === 5 || new Date().getDay() === 6 ? 0 : (new Date().getDay() === 0 ? 0 : new Date().getDay() - 1)]
-  );
+  const [activeDay, setActiveDay] = useState<string>(getKurdishDayName(new Date()));
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const [isSaved, setIsSaved] = useState<boolean>(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -363,14 +388,7 @@ const App: React.FC = () => {
   };
 
   const updateLiveModeData = (now: Date) => {
-    const kurdishDayMap: Record<number, string> = {
-      0: 'ئێکشەمبی',
-      1: 'دووشەمبی',
-      2: 'سێشەمبی',
-      3: 'چوارشەمبی',
-      4: 'پێنچ شەمبی',
-    };
-    const todayKurdish = kurdishDayMap[now.getDay()];
+    const todayKurdish = getKurdishDayName(now);
 
     if (!todayKurdish || !schedule[todayKurdish]) {
       setTimeRemaining("شوتیە");
@@ -1283,14 +1301,7 @@ const App: React.FC = () => {
     if (!alarmSettings.enabled || manualTimeStr) return;
     const interval = setInterval(() => {
       const now = new Date();
-      const kurdishDayMap: Record<number, string> = {
-        0: 'ئێکشەمبی',
-        1: 'دووشەمبی',
-        2: 'سێشەمبی',
-        3: 'چوارشەمبی',
-        4: 'پێنچ شەمبی',
-      };
-      const todayKurdish = kurdishDayMap[now.getDay()];
+      const todayKurdish = getKurdishDayName(now);
       if (!todayKurdish || !schedule[todayKurdish]) return;
       const currentTimeStr =
         now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0');
@@ -3273,9 +3284,12 @@ const App: React.FC = () => {
             </div>
             <div>
               <h1 className="text-lg font-black text-slate-800">جەتوەلا من (خشتەیێ قوتابخانێ)</h1>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                {teacherSubject} - {teacherName} | {alarmSettings.lessonCount || 6} دەرس
-              </p>
+              <div className="flex items-center gap-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">
+                <span>{teacherSubject} - {teacherName} | {alarmSettings.lessonCount || 6} دەرس</span>
+                <span className="text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full font-black">
+                  📅 {getFormattedFullKurdishDate(effectiveTime)}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -3396,11 +3410,11 @@ const App: React.FC = () => {
                 </span>
               )}
             </div>
-            <div className="text-lg text-slate-400 font-bold uppercase tracking-widest">
-              {DAYS[new Date().getDay() === 6 ? 0 : (new Date().getDay() === 0 ? 0 : new Date().getDay() - 1)]}
+            <div className="text-lg text-indigo-600 font-black tracking-wide flex items-center justify-center gap-2">
+              <span>📅 {getFormattedFullKurdishDate(effectiveTime)}</span>
               {alarmSettings.examSettings?.enabled && (
-                <span className="mr-2 text-xs bg-purple-100 text-purple-700 px-2.5 py-1 rounded-full font-black">
-                  ڕۆژا ئیمتیحانێ
+                <span className="text-xs bg-purple-100 text-purple-700 px-2.5 py-1 rounded-full font-black">
+                  ڕۆژا ئیمتیحانێ 📝
                 </span>
               )}
             </div>
