@@ -456,6 +456,7 @@ const App: React.FC = () => {
   const [aiPreviewData, setAiPreviewData] = useState<any>(null);
   const [aiImagePreview, setAiImagePreview] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [aiSuccessMessage, setAiSuccessMessage] = useState<string | null>(null);
 
   // API Key Testing & Validation State
   const [keyValidating, setKeyValidating] = useState<boolean>(false);
@@ -1935,6 +1936,7 @@ const App: React.FC = () => {
   const handleExtractFromImage = async (useSample: boolean = false, file?: File) => {
     setAiExtracting(true);
     setAiError(null);
+    setAiSuccessMessage(null);
     try {
       let base64Data = "";
       let mimeTypeStr = "image/jpeg";
@@ -1950,12 +1952,12 @@ const App: React.FC = () => {
         });
         mimeTypeStr = blob.type || "image/jpeg";
       } else if (file) {
-        const reader = new FileReader();
         base64Data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
           reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
+          reader.onerror = (err) => reject(err);
+          reader.readAsDataURL(file);
         });
-        reader.readAsDataURL(file);
         setAiImagePreview(base64Data);
         mimeTypeStr = file.type || "image/jpeg";
       } else {
@@ -1994,6 +1996,7 @@ const App: React.FC = () => {
       }
 
       setAiPreviewData(extractedData);
+      setAiSuccessMessage("🎉 خشتە ب سەرکەفتیانە دەرکەوت و جێبەجێبوو د بەرنامەی دا!");
 
       // Auto apply teacher name & subject if found
       if (extractedData.teacherName && extractedData.teacherName.trim()) {
@@ -2904,6 +2907,22 @@ const App: React.FC = () => {
                   <p className="text-xs text-slate-300">
                     ماموستا، بابەت، ڕۆژ و دەرسێن پۆلان دهێنە شیکارکرن
                   </p>
+                </div>
+              )}
+
+              {/* Success Banner */}
+              {aiSuccessMessage && (
+                <div className="p-4 rounded-2xl bg-emerald-50 border-2 border-emerald-300 text-emerald-900 text-xs font-black flex items-center justify-between shadow-sm animate-in fade-in">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                    <span>{aiSuccessMessage}</span>
+                  </div>
+                  <button
+                    onClick={() => setShowAiImportModal(false)}
+                    className="px-3 py-1 bg-emerald-600 text-white rounded-xl font-bold text-[11px] hover:bg-emerald-700"
+                  >
+                    داخستن
+                  </button>
                 </div>
               )}
 
