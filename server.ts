@@ -136,30 +136,48 @@ app.post("/api/gemini/extract-schedule", async (req, res) => {
       mimeType = "image/jpeg";
     }
 
+    const { customPrompt } = req.body;
     const promptText = `
-You are an expert school timetable scanner and OCR analyzer specializing in Kurdish school schedules (Badini / Sorani).
-Look at this school timetable document/photo carefully.
-Extract:
-1. Teacher Name (e.g. "م حسین" or "ماموستا حسێن")
-2. Subject (e.g. "کیمیا", "فیزیا", "زیندەوەر", "بیرکاری", "زانست", "کوردی", "ئینگلێزی", "عەرەبی", "پەروەردەیا ئاینی", "کۆمپیوتەر", "مافێن مرۆڤی", "جێنۆساید", "وەرزش", "هونەر", "دەروونناسی", "کۆمەڵایەتی", "مێژوو", "جوگرافیا", "ئابووری", "فەلسەفە", etc.)
-3. The weekly schedule table:
-   Grades can range from Grade 1 to 12 (پۆلا 1 تا پۆلا 12) with sections A-Y (أ، ب، ج، د، هـ، و، ز، ح، ط...).
-   The rows represent days (in Kurdish / Arabic):
-   - ئێکشەمبی
-   - دووشەمبی
-   - سێشەمبی
-   - چوارشەمبی
-   - پێنچ شەمبی
-   The columns are lesson numbers: 1, 2, 3, 4, 5, 6 (or up to 8).
-   For each cell, extract the class/grade/section name (e.g. "10 - ب", "پۆلا 1 - أ", "پۆلا 12 - زانستی أ", etc.).
-   If a cell is blank or empty, write "بێ وانە".
-   Also note whether the shift seems to be morning ("morning") or evening ("evening").
+You are an expert school timetable OCR scanner and analyzer specializing in Kurdish / Arabic school schedules (aSC Timetables, Minha Escola, and manual school charts).
 
-Return ONLY a valid JSON object following this schema:
+CRITICAL EXTRACTION RULES:
+1. READ COLUMN HEADERS CAREFULLY:
+   - The table header row contains period numbers: 1, 2, 3, 4, 5, 6 (or 1 to 8).
+   - In Kurdish/Arabic timetables, period 1 (وانا 1 / الدرس 1 / 1) is next to the Day column (usually on the right side).
+   - Period 1 MUST map to index 0 of the \`lessons\` array.
+   - Period 2 MUST map to index 1 of the \`lessons\` array.
+   - Period 3 MUST map to index 2 of the \`lessons\` array.
+   - Period 4 MUST map to index 3 of the \`lessons\` array.
+   - Period 5 MUST map to index 4 of the \`lessons\` array.
+   - Period 6 MUST map to index 5 of the \`lessons\` array.
+   - DO NOT INVERT OR REVERSE THE PERIOD ORDER.
+
+2. READ DAY NAMES CAREFULLY:
+   - Map Kurdish day names accurately:
+     "ئێکشەمبی" / "ئێك شه مبی" -> "ئێکشەمبی"
+     "دووشەمبی" / "دوو شه مبی" -> "دووشەمبی"
+     "سێشەمبی" / "سی شه مبی" -> "سێشەمبی"
+     "چوارشەمبی" / "چار شه مبی" -> "چوارشەمبی"
+     "پێنچ شەمبی" / "پینج شه مبی" -> "پێنچ شەمبی"
+
+3. READ CLASS / GRADE / SECTION NAMES CAREFULLY:
+   - Grade numbers: 1 to 12 (e.g. 10, 11, 12, 1, 2, 3...)
+   - Kurdish / Arabic section letters: أ, ب, ج, د, هـ, و, ز, ح, ط...
+   - Examples of valid cell text: "10 - ب", "10 - ج", "10 - د", "10 - هـ", "10 - و", "پۆلا 10 - د", "12 - زانستی أ", "11 - ب".
+   - IF A CELL IS EMPTY OR BLANK OR HAS NO CLASS NAME: Write strictly "بێ وانە".
+   - Make sure every day has the EXACT same array length corresponding to the total period count (e.g. exactly 6 elements for 6 periods).
+
+4. TEACHER & SUBJECT EXTRACTION:
+   - Teacher Name: Look at the top title (e.g. "م حسێن", "م. حوسێن", "مامۆستا حسێن").
+   - Subject Name: Look at small text inside cells or top title (e.g. "کیمیا", "فیزیا", "بیرکاری", "زانست", "کوردی", etc.).
+
+${customPrompt ? `USER SPECIAL INSTRUCTION: ${customPrompt}` : ""}
+
+Return ONLY a valid JSON object matching this schema:
 {
   "teacherName": string,
   "subject": string,
-  "lessonCountPerDay": number, // e.g. 6 or 7 (number of periods in one day)
+  "lessonCountPerDay": number,
   "days": [
     {
       "dayName": "ئێکشەمبی" | "دووشەمبی" | "سێشەمبی" | "چوارشەمبی" | "پێنچ شەمبی",

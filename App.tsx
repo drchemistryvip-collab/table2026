@@ -78,7 +78,7 @@ const callClientGeminiValidate = async (apiKeyToUse: string) => {
   throw lastErr || new Error("کلیل خەلەتە یان چالاک نینە");
 };
 
-const callClientGeminiExtract = async (apiKeyToUse: string, imageBase64Data: string, mimeTypeStr: string) => {
+const callClientGeminiExtract = async (apiKeyToUse: string, imageBase64Data: string, mimeTypeStr: string, customPromptStr?: string) => {
   const cleanKey = sanitizeApiKey(apiKeyToUse);
   if (!cleanKey) {
     throw new Error("تکایە API Key بنڤێسە دا خشتەی بەرهەم بینیت");
@@ -90,25 +90,42 @@ const callClientGeminiExtract = async (apiKeyToUse: string, imageBase64Data: str
   }
 
   const promptText = `
-You are an expert school timetable scanner and OCR analyzer specializing in Kurdish school schedules (Badini / Sorani).
-Look at this school timetable document/photo carefully.
-Extract:
-1. Teacher Name (e.g. "م حسین" or "ماموستا حسێن")
-2. Subject (e.g. "کیمیا", "فیزیا", "زیندەوەر", "بیرکاری", "زانست", "کوردی", "ئینگلێزی", "عەرەبی", "پەروەردەیا ئاینی", "کۆمپیوتەر", "مافێن مرۆڤی", "جێنۆساید", "وەرزش", "هونەر", "دەروونناسی", "کۆمەڵایەتی", "مێژوو", "جوگرافیا", "ئابووری", "فەلسەفە", etc.)
-3. The weekly schedule table:
-   Grades can range from Grade 1 to 12 (پۆلا 1 تا پۆلا 12) with sections A-Y (أ، ب، ج، د، هـ، و، ز، ح، ط...).
-   The rows represent days (in Kurdish / Arabic):
-   - ئێکشەمبی
-   - دووشەمبی
-   - سێشەمبی
-   - چوارشەمبی
-   - پێنچ شەمبی
-   The columns are lesson numbers: 1, 2, 3, 4, 5, 6 (or up to 8).
-   For each cell, extract the class/grade/section name (e.g. "10 - ب", "پۆلا 1 - أ", "پۆلا 12 - زانستی أ", etc.).
-   If a cell is blank or empty, write "بێ وانە".
-   Also note whether the shift seems to be morning ("morning") or evening ("evening").
+You are an expert school timetable OCR scanner and analyzer specializing in Kurdish / Arabic school schedules (aSC Timetables, Minha Escola, and manual school charts).
 
-Return ONLY a valid JSON object following this schema:
+CRITICAL EXTRACTION RULES:
+1. READ COLUMN HEADERS CAREFULLY:
+   - The table header row contains period numbers: 1, 2, 3, 4, 5, 6 (or 1 to 8).
+   - In Kurdish/Arabic timetables, period 1 (وانا 1 / الدرس 1 / 1) is next to the Day column (usually on the right side).
+   - Period 1 MUST map to index 0 of the \`lessons\` array.
+   - Period 2 MUST map to index 1 of the \`lessons\` array.
+   - Period 3 MUST map to index 2 of the \`lessons\` array.
+   - Period 4 MUST map to index 3 of the \`lessons\` array.
+   - Period 5 MUST map to index 4 of the \`lessons\` array.
+   - Period 6 MUST map to index 5 of the \`lessons\` array.
+   - DO NOT INVERT OR REVERSE THE PERIOD ORDER.
+
+2. READ DAY NAMES CAREFULLY:
+   - Map Kurdish day names accurately:
+     "ئێکشەمبی" / "ئێك شه مبی" -> "ئێکشەمبی"
+     "دووشەمبی" / "دوو شه مبی" -> "دووشەمبی"
+     "سێشەمبی" / "سی شه مبی" -> "سێشەمبی"
+     "چوارشەمبی" / "چار شه مبی" -> "چوارشەمبی"
+     "پێنچ شەمبی" / "پینج شه مبی" -> "پێنچ شەمبی"
+
+3. READ CLASS / GRADE / SECTION NAMES CAREFULLY:
+   - Grade numbers: 1 to 12 (e.g. 10, 11, 12, 1, 2, 3...)
+   - Kurdish / Arabic section letters: أ, ب, ج, د, هـ, و, ز, ح, ط...
+   - Examples of valid cell text: "10 - ب", "10 - ج", "10 - د", "10 - هـ", "10 - و", "پۆلا 10 - د", "12 - زانستی أ", "11 - ب".
+   - IF A CELL IS EMPTY OR BLANK OR HAS NO CLASS NAME: Write strictly "بێ وانە".
+   - Make sure every day has the EXACT same array length corresponding to the total period count (e.g. exactly 6 elements for 6 periods).
+
+4. TEACHER & SUBJECT EXTRACTION:
+   - Teacher Name: Look at the top title (e.g. "م حسێن", "م. حوسێن", "مامۆستا حسێن").
+   - Subject Name: Look at small text inside cells or top title (e.g. "کیمیا", "فیزیا", "بیرکاری", "زانست", "کوردی", etc.).
+
+${customPromptStr ? `USER SPECIAL INSTRUCTION: ${customPromptStr}` : ""}
+
+Return ONLY a valid JSON object matching this schema:
 {
   "teacherName": string,
   "subject": string,
@@ -457,6 +474,9 @@ const App: React.FC = () => {
   const [aiImagePreview, setAiImagePreview] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiSuccessMessage, setAiSuccessMessage] = useState<string | null>(null);
+  const [customOcrPrompt, setCustomOcrPrompt] = useState<string>(
+    "تکایە ب وردی ناڤێ ماموستای، بابەت، و جهـێ پۆلان د هەر وانەیەکێ دا ب ڕێزبەندیا درست (وانا 1 تا 6) بێ خەلەتی دیار بکە."
+  );
 
   // API Key Testing & Validation State
   const [keyValidating, setKeyValidating] = useState<boolean>(false);
@@ -1975,6 +1995,7 @@ const App: React.FC = () => {
             imageBase64: base64Data,
             mimeType: mimeTypeStr,
             customApiKey: userApiKey,
+            customPrompt: customOcrPrompt,
           }),
         }, 1200);
 
@@ -1988,7 +2009,7 @@ const App: React.FC = () => {
 
       // 2. Client-side direct fallback for GitHub Pages static host
       if (!extractedData) {
-        extractedData = await callClientGeminiExtract(userApiKey, base64Data, mimeTypeStr);
+        extractedData = await callClientGeminiExtract(userApiKey, base64Data, mimeTypeStr, customOcrPrompt);
       }
 
       if (!extractedData) {
@@ -2877,10 +2898,33 @@ const App: React.FC = () => {
                 </div>
               </div>
 
+              {/* Custom Prompt Instruction for Gemini OCR */}
+              <div className="p-4 rounded-3xl bg-slate-50 border border-slate-200 space-y-2">
+                <label className="text-xs font-black text-slate-700 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Wand2 className="w-4 h-4 text-indigo-600" />
+                    <span>پەیام و ڕێنمایی تایبەت بۆ جیمینی (Custom Prompt Instruction):</span>
+                  </span>
+                  <span className="text-[10px] text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full font-bold">
+                    بۆ دەرهێنانا دەقیقتر
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  value={customOcrPrompt}
+                  onChange={(e) => setCustomOcrPrompt(e.target.value)}
+                  placeholder="ڕێنمایی بۆ جیمینی بنڤێسە..."
+                  className="w-full text-xs p-3 bg-white border border-slate-300 rounded-2xl outline-none font-medium text-slate-800 focus:border-indigo-500 transition-all"
+                />
+                <p className="text-[10px] text-slate-400 font-medium pr-1">
+                  💡 ئەڤ تێکستە دگەل وێنەی دچیتە د جیمینی دا دا ناڤێ ماموستای، بابەت و جهـێ پۆلان د وانان دا ب دروستی دیار بکەت.
+                </p>
+              </div>
+
               {/* Or upload new custom image */}
               <div className="space-y-3">
                 <label className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
-                  <Upload className="w-4 h-4" /> یان بارکرنا هەر وێنەیەکێ دی یێ جەتوەلێ:
+                  <Upload className="w-4 h-4" /> بارکرنا وێنەیێ جەتوەلێ (Upload Schedule Photo):
                 </label>
                 <label className="border-2 border-dashed border-slate-300 hover:border-indigo-400 bg-slate-50 hover:bg-indigo-50/30 rounded-3xl p-8 flex flex-col items-center justify-center cursor-pointer transition-all text-center">
                   <Camera className="w-10 h-10 text-slate-400 mb-2" />
