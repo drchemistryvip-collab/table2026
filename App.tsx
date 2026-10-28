@@ -16,14 +16,38 @@ import {
 } from './types';
 import { INITIAL_SCHEDULE, VOICE_SCRIPTS, calculateSlotTimes, generateSlotsForDay } from './constants';
 
+// Check if running on a static host (like GitHub Pages)
+const isStaticHost = () => {
+  if (typeof window === 'undefined') return false;
+  const host = window.location.hostname;
+  return host.includes('github.io') || host.includes('githubusercontent.com') || host.includes('netlify.app') || host.includes('vercel.app');
+};
+
+// Fast fetch helper with short timeout for server endpoints to prevent hanging on static hosts
+const fetchServerWithTimeout = async (url: string, options: RequestInit, timeoutMs = 1200) => {
+  if (isStaticHost()) {
+    throw new Error("Static host detected - bypassing server endpoint immediately");
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(timer);
+    return res;
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
+};
+
 const CLIENT_GEMINI_MODELS = [
   "gemini-2.5-flash",
+  "gemini-1.5-flash",
+  "gemini-2.0-flash",
+  "gemini-2.5-flash-lite",
   "gemini-3.8-flash",
   "gemini-2.5-pro",
-  "gemini-2.5-flash-lite",
-  "gemini-1.5-flash",
   "gemini-1.5-pro",
-  "gemini-2.0-flash",
 ];
 
 const sanitizeApiKey = (key?: string) => {
@@ -447,13 +471,13 @@ const App: React.FC = () => {
       let isSuccess = false;
       let errorMsg = "";
 
-      // 1. Try server endpoint first
+      // 1. Try server endpoint first (instantly bypassed if static host like GitHub Pages)
       try {
-        const res = await fetch("/api/gemini/validate-key", {
+        const res = await fetchServerWithTimeout("/api/gemini/validate-key", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ customApiKey: k }),
-        });
+        }, 1200);
 
         if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
           const data = await res.json();
@@ -468,7 +492,7 @@ const App: React.FC = () => {
         // Server unavailable (e.g. GitHub Pages static host)
       }
 
-      // 2. Client-side fallback for GitHub Pages / static deployment
+      // 2. Client-side direct call
       try {
         await callClientGeminiValidate(k);
         setKeyValidationStatus('valid');
@@ -1856,13 +1880,13 @@ const App: React.FC = () => {
     try {
       let base64Audio = "";
 
-      // 1. Try server endpoint first
+      // 1. Try server endpoint first (instantly bypassed on static host)
       try {
-        const res = await fetch("/api/gemini/tts", {
+        const res = await fetchServerWithTimeout("/api/gemini/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text, voiceGender, customApiKey: userApiKey }),
-        });
+        }, 1200);
         if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
           const data = await res.json();
           if (data.success && data.audioBase64) {
@@ -1940,9 +1964,9 @@ const App: React.FC = () => {
 
       let extractedData: any = null;
 
-      // 1. Try server endpoint first
+      // 1. Try server endpoint first (instantly bypassed on static host)
       try {
-        const res = await fetch("/api/gemini/extract-schedule", {
+        const res = await fetchServerWithTimeout("/api/gemini/extract-schedule", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1950,7 +1974,7 @@ const App: React.FC = () => {
             mimeType: mimeTypeStr,
             customApiKey: userApiKey,
           }),
-        });
+        }, 1200);
 
         if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
           const json = await res.json();
@@ -2050,9 +2074,9 @@ const App: React.FC = () => {
     try {
       let parsedSettings: any = null;
 
-      // 1. Try server endpoint first
+      // 1. Try server endpoint first (instantly bypassed on static host)
       try {
-        const res = await fetch("/api/gemini/parse-timing-command", {
+        const res = await fetchServerWithTimeout("/api/gemini/parse-timing-command", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -2060,7 +2084,7 @@ const App: React.FC = () => {
             currentSettings: alarmSettings,
             customApiKey: userApiKey,
           }),
-        });
+        }, 1200);
 
         if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
           const json = await res.json();
