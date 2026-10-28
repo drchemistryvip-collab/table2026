@@ -104,7 +104,8 @@ const App: React.FC = () => {
   const [readyVoices, setReadyVoices] = useState<string[]>([]);
   const [voiceGender, setVoiceGender] = useState<'male' | 'female'>('male');
   const [customScripts, setCustomScripts] = useState<Record<string, string>>(VOICE_SCRIPTS);
-  const [editingScriptKey, setEditingScriptKey] = useState<string | null>(null);
+  const [teacherName, setTeacherName] = useState<string>("ماموستا حوسێن");
+  const [teacherSubject, setTeacherSubject] = useState<string>("کیمیا");
   const [activeTheme, setActiveTheme] = useState(THEMES[0]);
 
   // PWA Install & Platform Detection
@@ -459,6 +460,11 @@ const App: React.FC = () => {
     const savedGender = localStorage.getItem('voice_gender');
     const savedScripts = localStorage.getItem('custom_scripts_v6');
     const savedThemeId = localStorage.getItem('app_theme_id');
+    const savedTeacherName = localStorage.getItem('teacher_name');
+    const savedTeacherSubject = localStorage.getItem('teacher_subject');
+
+    if (savedTeacherName) setTeacherName(savedTeacherName);
+    if (savedTeacherSubject) setTeacherSubject(savedTeacherSubject);
 
     if (saved) {
       try {
@@ -671,7 +677,7 @@ const App: React.FC = () => {
 
       ctx.font = '900 48px Vazirmatn, sans-serif';
       ctx.fillStyle = textColor;
-      ctx.fillText('ماموستا حوسێن — کیمیا', width / 2, 280);
+      ctx.fillText(`${teacherName} — ${teacherSubject}`, width / 2, 280);
 
       ctx.font = '700 28px Vazirmatn, sans-serif';
       ctx.fillStyle = accentColor;
@@ -726,21 +732,31 @@ const App: React.FC = () => {
         ctx.textAlign = 'center';
         ctx.fillText(`وانا ${idx + 1}`, cardX + 95, startY + 82);
 
-        ctx.textAlign = 'right';
-        ctx.fillStyle = textColor;
-        ctx.font = '900 42px Vazirmatn, sans-serif';
-        const classNameStr = slot.className === 'بێ وانە' ? 'بەتاڵ (بێ وانە)' : (slot.className.startsWith('پۆلا') ? slot.className : `پۆلا ${slot.className}`);
-        ctx.fillText(classNameStr, cardX + cardW - 35, startY + 70);
+        const isEmpty = !slot.className || slot.className === 'بێ وانە';
 
-        ctx.font = '700 28px Vazirmatn, sans-serif';
-        ctx.fillStyle = subTextColor;
-        ctx.fillText(`${slot.subject || 'کیمیا'}  •  ⏰ ${slot.startTime} — ${slot.endTime}`, cardX + cardW - 35, startY + 118);
+        if (!isEmpty) {
+          ctx.textAlign = 'right';
+          ctx.fillStyle = textColor;
+          ctx.font = '900 42px Vazirmatn, sans-serif';
+          const classNameStr = slot.className.startsWith('پۆلا') ? slot.className : `پۆلا ${slot.className}`;
+          ctx.fillText(classNameStr, cardX + cardW - 35, startY + 70);
+
+          ctx.font = '700 28px Vazirmatn, sans-serif';
+          ctx.fillStyle = subTextColor;
+          ctx.fillText(`${slot.subject || teacherSubject}  •  ⏰ ${slot.startTime} — ${slot.endTime}`, cardX + cardW - 35, startY + 118);
+        } else {
+          ctx.textAlign = 'right';
+          ctx.fillStyle = subTextColor;
+          ctx.font = '700 28px Vazirmatn, sans-serif';
+          ctx.fillText(`⏰ ${slot.startTime} — ${slot.endTime} (بەتاڵ)`, cardX + cardW - 35, startY + 85);
+        }
 
         ctx.restore();
         startY += cardH + wallpaperSpacing;
       });
 
     } else {
+      // Full Week View - Right To Left (RTL) Layout: Lesson 1 on far right, Lesson 6 on far left
       DAYS.forEach((dayName) => {
         const dayData = schedule[dayName];
         if (!dayData) return;
@@ -768,30 +784,36 @@ const App: React.FC = () => {
         const slotWidth = (cardW - 50) / slotCount;
 
         dayData.slots.forEach((slot, sIdx) => {
-          const sx = cardX + 25 + sIdx * slotWidth;
+          // RTL placement: sIdx = 0 (Lesson 1) gets placed at highest X index (far right)
+          const rtlIndex = slotCount - 1 - sIdx;
+          const sx = cardX + 25 + rtlIndex * slotWidth;
           const sy = startY + 70;
+          const isEmpty = !slot.className || slot.className === 'بێ وانە';
 
           ctx.beginPath();
           if ((ctx as any).roundRect) (ctx as any).roundRect(sx, sy, slotWidth - 10, 110, 16);
           else ctx.rect(sx, sy, slotWidth - 10, 110);
-          ctx.fillStyle = slot.className === 'بێ وانە'
-            ? (isLight ? 'rgba(226, 232, 240, 0.6)' : 'rgba(255, 255, 255, 0.04)')
+          ctx.fillStyle = isEmpty
+            ? (isLight ? 'rgba(226, 232, 240, 0.3)' : 'rgba(255, 255, 255, 0.02)')
             : (isLight ? 'rgba(79, 70, 229, 0.12)' : 'rgba(99, 102, 241, 0.28)');
           ctx.fill();
 
-          ctx.textAlign = 'center';
-          ctx.fillStyle = isLight ? '#475569' : '#cbd5e1';
-          ctx.font = 'bold 22px Vazirmatn, sans-serif';
-          ctx.fillText(`و${sIdx + 1}`, sx + (slotWidth - 10) / 2, sy + 32);
+          if (!isEmpty) {
+            ctx.textAlign = 'center';
+            ctx.fillStyle = isLight ? '#475569' : '#cbd5e1';
+            ctx.font = 'bold 22px Vazirmatn, sans-serif';
+            ctx.fillText(`و${sIdx + 1}`, sx + (slotWidth - 10) / 2, sy + 32);
 
-          ctx.font = '900 28px Vazirmatn, sans-serif';
-          ctx.fillStyle = slot.className === 'بێ وانە' ? (isLight ? '#94a3b8' : '#64748b') : textColor;
-          const shortClass = slot.className.replace('پۆلا ', '');
-          ctx.fillText(shortClass, sx + (slotWidth - 10) / 2, sy + 72);
+            ctx.font = '900 28px Vazirmatn, sans-serif';
+            ctx.fillStyle = textColor;
+            const shortClass = slot.className.replace('پۆلا ', '');
+            ctx.fillText(shortClass, sx + (slotWidth - 10) / 2, sy + 72);
 
-          ctx.font = '700 18px Vazirmatn, sans-serif';
-          ctx.fillStyle = subTextColor;
-          ctx.fillText((slot.subject || 'کیمیا').slice(0, 7), sx + (slotWidth - 10) / 2, sy + 98);
+            ctx.font = '700 18px Vazirmatn, sans-serif';
+            ctx.fillStyle = subTextColor;
+            ctx.fillText((slot.subject || teacherSubject).slice(0, 7), sx + (slotWidth - 10) / 2, sy + 98);
+          }
+          // If empty, leave completely blank without any text!
         });
 
         ctx.restore();
@@ -807,7 +829,7 @@ const App: React.FC = () => {
       ctx.textAlign = 'center';
       ctx.font = '700 28px Vazirmatn, sans-serif';
       ctx.fillStyle = subTextColor;
-      ctx.fillText('📱 بەرنامەیێ جەتوەلا من — م. حوسێن | 2026', width / 2, height - 60);
+      ctx.fillText(`📱 بەرنامەیێ جەتوەلا من — ${teacherName} | 2026`, width / 2, height - 60);
       ctx.restore();
     }
   };
@@ -837,6 +859,8 @@ const App: React.FC = () => {
     wallpaperSpacing,
     wallpaperShowHeader,
     wallpaperShowFooter,
+    teacherName,
+    teacherSubject,
     schedule,
     activeDay
   ]);
@@ -960,6 +984,8 @@ const App: React.FC = () => {
     localStorage.setItem('voice_gender', voiceGender);
     localStorage.setItem('custom_scripts_v6', JSON.stringify(customScripts));
     localStorage.setItem('app_theme_id', activeTheme.id);
+    localStorage.setItem('teacher_name', teacherName);
+    localStorage.setItem('teacher_subject', teacherSubject);
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 3000);
   };
@@ -1340,6 +1366,36 @@ const App: React.FC = () => {
             <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto no-scrollbar">
               {/* Controls */}
               <div className="space-y-4 bg-slate-50 p-4 rounded-3xl border border-slate-200">
+                {/* Teacher Profile Name & Subject Inputs */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-3 border-b border-slate-200">
+                  <div>
+                    <label className="text-xs font-black text-slate-700 block mb-1">ناو و ناڤنیشانێ مامۆستایی:</label>
+                    <input
+                      type="text"
+                      value={teacherName}
+                      onChange={(e) => {
+                        setTeacherName(e.target.value);
+                        localStorage.setItem('teacher_name', e.target.value);
+                      }}
+                      placeholder="نموونە: ماموستا حوسێن"
+                      className="w-full text-xs p-2.5 bg-white border border-slate-200 rounded-xl font-bold outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-black text-slate-700 block mb-1">بابەت / پسپۆڕی:</label>
+                    <input
+                      type="text"
+                      value={teacherSubject}
+                      onChange={(e) => {
+                        setTeacherSubject(e.target.value);
+                        localStorage.setItem('teacher_subject', e.target.value);
+                      }}
+                      placeholder="نموونە: کیمیا"
+                      className="w-full text-xs p-2.5 bg-white border border-slate-200 rounded-xl font-bold outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Mode Selector */}
                   <div>
@@ -2628,7 +2684,7 @@ const App: React.FC = () => {
             <div>
               <h1 className="text-lg font-black text-slate-800">جەتوەلا من (خشتەیێ قوتابخانێ)</h1>
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                کیمیا - م. حوسێن | {alarmSettings.lessonCount || 6} دەرس
+                {teacherSubject} - {teacherName} | {alarmSettings.lessonCount || 6} دەرس
               </p>
             </div>
           </div>
@@ -3231,7 +3287,7 @@ const App: React.FC = () => {
                   >
                     <div className="flex flex-wrap items-center justify-between gap-4 px-2">
                       <div className="text-right">
-                        <span>جەتوەلا وانێن کیمیایێ - ماموستا حوسێن</span>
+                        <span>جەتوەلا وانێن {teacherSubject} - {teacherName}</span>
                         <div className="text-xs text-slate-400 font-bold mt-1">
                           {alarmSettings.lessonCount || 6} دەرس | سپێدە {alarmSettings.morningDuration} خولەک | هێڤاری {alarmSettings.eveningDuration} خولەک
                         </div>
