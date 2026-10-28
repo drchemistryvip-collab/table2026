@@ -30,17 +30,60 @@ function getAIClient(customApiKey?: string) {
   });
 }
 
+// List of candidate Gemini models in priority order (Flash, Pro, Lite, etc.)
+const GENERAL_GEMINI_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-3.8-flash",
+  "gemini-2.5-pro",
+  "gemini-2.5-flash-lite",
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+  "gemini-2.0-flash",
+];
+
+const TTS_GEMINI_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-3.8-flash-lite-tts",
+  "gemini-2.5-flash-lite",
+  "gemini-1.5-flash",
+];
+
+async function generateContentWithFallback(
+  aiClient: GoogleGenAI,
+  candidateModels: string[],
+  payload: any
+) {
+  let lastError: any = null;
+  for (const modelName of candidateModels) {
+    try {
+      console.log(`Trying Gemini model: ${modelName}...`);
+      const response = await aiClient.models.generateContent({
+        ...payload,
+        model: modelName,
+      });
+      if (response) {
+        return { response, usedModel: modelName };
+      }
+    } catch (err: any) {
+      console.warn(`Gemini model ${modelName} failed, trying next fallback:`, err?.message || err);
+      lastError = err;
+    }
+  }
+  throw lastError || new Error("All candidate Gemini models failed to respond.");
+}
+
 // Validate custom or default API key
 app.post("/api/gemini/validate-key", async (req, res) => {
   try {
     const { customApiKey, apiKey } = req.body;
     const aiClient = getAIClient(customApiKey || apiKey);
-    const response = await aiClient.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: "Respond with OK to test key connection.",
-    });
+    const { response, usedModel } = await generateContentWithFallback(
+      aiClient,
+      GENERAL_GEMINI_MODELS,
+      { contents: "Respond with OK to test key connection." }
+    );
     if (response && response.text) {
-      return res.json({ success: true, valid: true });
+      return res.json({ success: true, valid: true, usedModel });
     } else {
       return res.json({ success: true, valid: false, error: "no response text from Gemini API" });
     }
@@ -128,25 +171,28 @@ Return ONLY a valid JSON object following this schema:
 }
 `;
 
-    const response = await aiClient.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: imageBase64,
+    const { response, usedModel } = await generateContentWithFallback(
+      aiClient,
+      GENERAL_GEMINI_MODELS,
+      {
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: imageBase64,
+              },
             },
-          },
-          {
-            text: promptText,
-          },
-        ],
-      },
-      config: {
-        responseMimeType: "application/json",
-      },
-    });
+            {
+              text: promptText,
+            },
+          ],
+        },
+        config: {
+          responseMimeType: "application/json",
+        },
+      }
+    );
 
     const responseText = response.text || "{}";
     let parsedData;
@@ -160,6 +206,7 @@ Return ONLY a valid JSON object following this schema:
 
     return res.json({
       success: true,
+      usedModel,
       data: parsedData,
     });
   } catch (error: any) {
@@ -217,18 +264,21 @@ Return JSON with this exact structure:
 }
 `;
 
-    const response = await aiClient.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: prompt,
-      config: {
-        systemInstruction,
-        responseMimeType: "application/json",
-      },
-    });
+    const { response, usedModel } = await generateContentWithFallback(
+      aiClient,
+      GENERAL_GEMINI_MODELS,
+      {
+        contents: prompt,
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+        },
+      }
+    );
 
     const responseText = response.text || "{}";
     const parsed = JSON.parse(responseText.replace(/```json/g, "").replace(/```/g, "").trim());
-    return res.json({ success: true, settings: parsed });
+    return res.json({ success: true, usedModel, settings: parsed });
   } catch (error: any) {
     console.error("Error in parse-timing-command:", error);
     return res.status(500).json({ success: false, error: error?.message });
@@ -248,23 +298,26 @@ app.post("/api/gemini/tts", async (req, res) => {
     const aiClient = getAIClient(customApiKey || apiKey);
     const voiceName = voiceGender === "female" ? "Kore" : "Puck";
 
-    const response = await aiClient.models.generateContent({
-      model: "gemini-3.8-flash-lite-tts",
-      contents: [
-        {
-          role: "user",
-          parts: [{ text }],
-        },
-      ],
-      config: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName },
+    const { response, usedModel } = await generateContentWithFallback(
+      aiClient,
+      TTS_GEMINI_MODELS,
+      {
+        contents: [
+          {
+            role: "user",
+            parts: [{ text }],
+          },
+        ],
+        config: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName },
+            },
           },
         },
-      },
-    });
+      }
+    );
 
     const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (!base64Audio) {
@@ -273,6 +326,7 @@ app.post("/api/gemini/tts", async (req, res) => {
 
     return res.json({
       success: true,
+      usedModel,
       audioBase64: base64Audio,
       mimeType: "audio/wav",
     });
