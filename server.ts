@@ -27,8 +27,29 @@ function getAIClient(customApiKey?: string) {
   });
 }
 
-// Default instance using environment variable
-const ai = getAIClient();
+// Validate custom or default API key
+app.post("/api/gemini/validate-key", async (req, res) => {
+  try {
+    const { customApiKey, apiKey } = req.body;
+    const aiClient = getAIClient(customApiKey || apiKey);
+    const response = await aiClient.models.generateContent({
+      model: "gemini-3.8-flash",
+      contents: "Respond with OK to test key connection.",
+    });
+    if (response && response.text) {
+      return res.json({ success: true, valid: true });
+    } else {
+      return res.json({ success: true, valid: false, error: "no response text from Gemini API" });
+    }
+  } catch (error: any) {
+    console.error("Error validating key:", error);
+    return res.json({
+      success: true,
+      valid: false,
+      error: error?.message || "Invalid or inactive API key",
+    });
+  }
+});
 
 /**
  * 1. Extract School Timetable from an Uploaded Image or from the sample attachment
@@ -39,13 +60,19 @@ app.post("/api/gemini/extract-schedule", async (req, res) => {
     const aiClient = getAIClient(customApiKey || apiKey);
 
     if (useSample || !imageBase64) {
-      const samplePath = path.join(__dirname, "public/assets/aistudio/photo_2026-10-27_21-33-17_62edd79f.jpg");
-      if (fs.existsSync(samplePath)) {
-        const fileBuffer = fs.readFileSync(samplePath);
+      const candidates = [
+        path.join(process.cwd(), "public/assets/aistudio/photo_2026-10-27_21-33-17_62edd79f.jpg"),
+        path.join(__dirname, "public/assets/aistudio/photo_2026-10-27_21-33-17_62edd79f.jpg"),
+        path.join(process.cwd(), "public/assets/aistudio/photo_2026-10-27_22-48-36_2a3b3357.jpg"),
+        path.join(__dirname, "public/assets/aistudio/photo_2026-10-27_22-48-36_2a3b3357.jpg"),
+      ];
+      let foundPath = candidates.find((p) => fs.existsSync(p));
+      if (foundPath) {
+        const fileBuffer = fs.readFileSync(foundPath);
         imageBase64 = fileBuffer.toString("base64");
         mimeType = "image/jpeg";
       } else {
-        return res.status(400).json({ error: "No image provided and sample image not found" });
+        return res.status(400).json({ success: false, error: "وێنەیێ سەمپل نەهاتە لێدۆزین د سێرڤەری دا" });
       }
     }
 

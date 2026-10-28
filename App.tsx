@@ -222,6 +222,42 @@ const App: React.FC = () => {
   const [aiImagePreview, setAiImagePreview] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
 
+  // API Key Testing & Validation State
+  const [keyValidating, setKeyValidating] = useState<boolean>(false);
+  const [keyValidationStatus, setKeyValidationStatus] = useState<'valid' | 'invalid' | null>(null);
+  const [keyValidationError, setKeyValidationError] = useState<string | null>(null);
+
+  const testApiKey = async (keyToTest?: string) => {
+    const k = keyToTest !== undefined ? keyToTest : userApiKey;
+    setKeyValidating(true);
+    setKeyValidationStatus(null);
+    setKeyValidationError(null);
+    try {
+      const res = await fetch("/api/gemini/validate-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customApiKey: k }),
+      });
+
+      if (!res.headers.get("content-type")?.includes("application/json")) {
+        throw new Error("وەڵامی سێرڤەر نادیارە (HTML error page)");
+      }
+
+      const data = await res.json();
+      if (data.valid) {
+        setKeyValidationStatus('valid');
+      } else {
+        setKeyValidationStatus('invalid');
+        setKeyValidationError(data.error || "کلیل خەلەتە یان چالاک نینە");
+      }
+    } catch (err: any) {
+      setKeyValidationStatus('invalid');
+      setKeyValidationError(err?.message || "کێشەیەک لە پەیوەندی دروست بوو");
+    } finally {
+      setKeyValidating(false);
+    }
+  };
+
   // AI Timing Assistant State
   const [aiTimingPrompt, setAiTimingPrompt] = useState("");
   const [aiTimingLoading, setAiTimingLoading] = useState(false);
@@ -1634,7 +1670,7 @@ const App: React.FC = () => {
       let body: any = { customApiKey: userApiKey };
       if (useSample) {
         body.useSample = true;
-        setAiImagePreview("/public/assets/aistudio/photo_2026-10-27_21-33-17_62edd79f.jpg");
+        setAiImagePreview("/assets/aistudio/photo_2026-10-27_21-33-17_62edd79f.jpg");
       } else if (file) {
         const reader = new FileReader();
         const base64Promise = new Promise<string>((resolve, reject) => {
@@ -1656,12 +1692,32 @@ const App: React.FC = () => {
         body: JSON.stringify(body),
       });
 
+      if (!res.headers.get("content-type")?.includes("application/json")) {
+        throw new Error("سێرڤەر وەڵامێکی نادیاری داوە (Non-JSON HTML error). تکایە تکا دەکەین API Key تاقی بکەرەوە.");
+      }
+
       const json = await res.json();
       if (!res.ok || !json.success || !json.data) {
         throw new Error(json.error || "شکست لە دەرهێنانا خشتەی");
       }
 
-      setAiPreviewData(json.data);
+      const extractedData = json.data;
+      setAiPreviewData(extractedData);
+
+      // Auto apply teacher name & subject if found
+      if (extractedData.teacherName && extractedData.teacherName.trim()) {
+        setTeacherName(extractedData.teacherName.trim());
+        localStorage.setItem('teacher_name', extractedData.teacherName.trim());
+        saveBackupData('teacher_name', extractedData.teacherName.trim());
+      }
+      if (extractedData.subject && extractedData.subject.trim()) {
+        setTeacherSubject(extractedData.subject.trim());
+        localStorage.setItem('teacher_subject', extractedData.subject.trim());
+        saveBackupData('teacher_subject', extractedData.subject.trim());
+      }
+
+      // Automatically apply extracted schedule immediately as requested!
+      applyExtractedScheduleData(extractedData);
     } catch (err: any) {
       console.error(err);
       setAiError(err.message || "خەلەتیەک لە پەیوەندی ب جیمینی دروست بوو");
@@ -1670,12 +1726,13 @@ const App: React.FC = () => {
     }
   };
 
-  // Apply Extracted Timetable to App Schedule
-  const applyExtractedSchedule = () => {
-    if (!aiPreviewData || !aiPreviewData.days) return;
+  // Apply Extracted Timetable to App Schedule directly
+  const applyExtractedScheduleData = (dataToApply?: any) => {
+    const data = dataToApply || aiPreviewData;
+    if (!data || !data.days) return;
 
-    const firstDayCount = aiPreviewData.days?.[0]?.lessons?.length || 6;
-    let count = aiPreviewData.lessonCountPerDay || firstDayCount;
+    const firstDayCount = data.days?.[0]?.lessons?.length || 6;
+    let count = data.lessonCountPerDay || firstDayCount;
     if (count > 10) count = firstDayCount;
     const newSettings: AlarmSettings = {
       ...alarmSettings,
@@ -1687,7 +1744,7 @@ const App: React.FC = () => {
 
     DAYS.forEach((dayName) => {
       // Find matching day in extracted days
-      const extractedDay = aiPreviewData.days.find((d: any) => {
+      const extractedDay = data.days.find((d: any) => {
         const norm1 = d.dayName?.replace(/\s+/g, '') || '';
         const norm2 = dayName.replace(/\s+/g, '');
         return norm1.includes(norm2) || norm2.includes(norm1);
@@ -1709,10 +1766,14 @@ const App: React.FC = () => {
     setSchedule(updatedSchedule);
     localStorage.setItem('timetable_data', JSON.stringify(updatedSchedule));
     localStorage.setItem('alarm_settings_v9', JSON.stringify(newSettings));
-    setShowAiImportModal(false);
+    saveBackupData('timetable_data', updatedSchedule);
+    saveBackupData('alarm_settings_v9', newSettings);
+
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 3000);
   };
+
+  const applyExtractedSchedule = () => applyExtractedScheduleData();
 
   // Parse natural language command for timing with Gemini
   const handleAiTimingCommand = async () => {
@@ -2410,7 +2471,7 @@ const App: React.FC = () => {
                 </a>
 
                 {/* API Key Input Box (لاکێشەک) */}
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <label className="text-[11px] text-purple-200 font-extrabold block">
                     لاکێشا لێدانا API Key (Copy & Paste):
                   </label>
@@ -2419,7 +2480,10 @@ const App: React.FC = () => {
                       <input
                         type={showApiKeyText ? "text" : "password"}
                         value={userApiKey}
-                        onChange={(e) => handleSaveApiKey(e.target.value)}
+                        onChange={(e) => {
+                          handleSaveApiKey(e.target.value);
+                          setKeyValidationStatus(null);
+                        }}
                         placeholder="AIzaSy... (API Key یێ خۆ لێرە کۆپی پاست بکە)"
                         className="w-full text-xs p-3 pr-10 bg-black/40 border border-purple-400/40 rounded-2xl text-white font-mono placeholder:text-slate-400 outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition-all"
                       />
@@ -2435,13 +2499,43 @@ const App: React.FC = () => {
 
                     {userApiKey ? (
                       <button
-                        onClick={() => handleSaveApiKey('')}
+                        onClick={() => {
+                          handleSaveApiKey('');
+                          setKeyValidationStatus(null);
+                        }}
                         className="px-3 py-3 rounded-2xl bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 text-xs font-bold transition-all"
                         title="پاقژکرن"
                       >
                         پاقژکرن
                       </button>
                     ) : null}
+                  </div>
+
+                  {/* API Key Test & Status Action */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => testApiKey()}
+                      disabled={keyValidating}
+                      className="flex items-center gap-1.5 px-3.5 py-2 bg-yellow-400 hover:bg-yellow-300 active:scale-95 text-slate-950 rounded-xl font-black text-xs transition-all shadow-md disabled:opacity-50"
+                    >
+                      {keyValidating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                      <span>پشکنینا API Key (Test Key)</span>
+                    </button>
+
+                    {keyValidationStatus === 'valid' && (
+                      <span className="text-[11px] font-black text-emerald-300 bg-emerald-900/60 border border-emerald-500/50 px-3 py-1 rounded-xl flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>کلیل کار دکەت ✓ (API Key Active)</span>
+                      </span>
+                    )}
+
+                    {keyValidationStatus === 'invalid' && (
+                      <span className="text-[11px] font-black text-red-300 bg-red-900/60 border border-red-500/50 px-3 py-1 rounded-xl flex items-center gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+                        <span>کلیل خەلەتە ✗ {keyValidationError ? `(${keyValidationError})` : ''}</span>
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2451,7 +2545,7 @@ const App: React.FC = () => {
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
                   <div className="flex items-center gap-3 text-right">
                     <img
-                      src="/public/assets/aistudio/photo_2026-10-27_21-33-17_62edd79f.jpg"
+                      src="/assets/aistudio/photo_2026-10-27_21-33-17_62edd79f.jpg"
                       alt="Sample"
                       className="w-16 h-16 rounded-2xl object-cover border-2 border-indigo-200 shadow-sm"
                     />
