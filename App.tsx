@@ -151,6 +151,15 @@ const App: React.FC = () => {
   const [wallpaperShowFooter, setWallpaperShowFooter] = useState<boolean>(true);
   const wallpaperCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  // Widget Studio State
+  const [showWidgetModal, setShowWidgetModal] = useState(false);
+  const [widgetStyle, setWidgetStyle] = useState<'current' | 'today' | 'bar' | 'week'>('current');
+  const [widgetTheme, setWidgetTheme] = useState<'amoled' | 'glass' | 'indigo' | 'emerald'>('amoled');
+  const [pipActive, setPipActive] = useState<boolean>(false);
+  const widgetCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pipCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pipVideoRef = useRef<HTMLVideoElement | null>(null);
+
   const toggleViewMode = () => setViewMode((prev) => (prev === 'modern' ? 'classic' : 'modern'));
   const currentDayData = schedule[activeDay] || schedule[DAYS[0]];
 
@@ -865,6 +874,410 @@ const App: React.FC = () => {
     activeDay
   ]);
 
+  // -------------------------------------------------------------------
+  // WIDGET STUDIO CANVAS RENDERER & FLOATING PIP LOGIC
+  // -------------------------------------------------------------------
+  const drawWidgetToCanvas = (
+    canvas: HTMLCanvasElement,
+    style: 'current' | 'today' | 'bar' | 'week',
+    theme: 'amoled' | 'glass' | 'indigo' | 'emerald'
+  ) => {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let width = 800;
+    let height = 800;
+    if (style === 'today') {
+      width = 1200;
+      height = 600;
+    } else if (style === 'bar') {
+      width = 1200;
+      height = 320;
+    } else if (style === 'week') {
+      width = 1200;
+      height = 1200;
+    }
+
+    canvas.width = width;
+    canvas.height = height;
+
+    let bgGrad = ctx.createLinearGradient(0, 0, width, height);
+    let cardBg = 'rgba(255, 255, 255, 0.08)';
+    let cardBorder = 'rgba(255, 255, 255, 0.18)';
+    let primaryTextColor = '#ffffff';
+    let subTextColor = '#94a3b8';
+    let accentColor = '#6366f1';
+
+    if (theme === 'amoled') {
+      bgGrad.addColorStop(0, '#090d16');
+      bgGrad.addColorStop(1, '#020617');
+      cardBg = 'rgba(30, 41, 59, 0.45)';
+      cardBorder = 'rgba(255, 255, 255, 0.14)';
+      accentColor = '#38bdf8';
+    } else if (theme === 'glass') {
+      bgGrad.addColorStop(0, '#0f172a');
+      bgGrad.addColorStop(0.5, '#1e1b4b');
+      bgGrad.addColorStop(1, '#31103f');
+      cardBg = 'rgba(255, 255, 255, 0.1)';
+      cardBorder = 'rgba(255, 255, 255, 0.22)';
+      accentColor = '#c084fc';
+    } else if (theme === 'indigo') {
+      bgGrad.addColorStop(0, '#1e1b4b');
+      bgGrad.addColorStop(1, '#3730a3');
+      cardBg = 'rgba(255, 255, 255, 0.14)';
+      cardBorder = 'rgba(255, 255, 255, 0.25)';
+      accentColor = '#818cf8';
+    } else if (theme === 'emerald') {
+      bgGrad.addColorStop(0, '#022c22');
+      bgGrad.addColorStop(1, '#064e3b');
+      cardBg = 'rgba(255, 255, 255, 0.12)';
+      cardBorder = 'rgba(255, 255, 255, 0.22)';
+      accentColor = '#34d399';
+    }
+
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.save();
+    ctx.fillStyle = accentColor;
+    ctx.globalAlpha = 0.18;
+    ctx.beginPath();
+    ctx.arc(width * 0.85, height * 0.15, width * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    const drawRoundedRect = (x: number, y: number, w: number, h: number, r: number, fill: string, stroke?: string, strokeWidth = 2) => {
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+      ctx.fillStyle = fill;
+      ctx.fill();
+      if (stroke) {
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = strokeWidth;
+        ctx.stroke();
+      }
+      ctx.restore();
+    };
+
+    const activeSlot = currentLiveSlot.slot;
+    const isBreak = currentLiveSlot.status === 'break';
+
+    if (style === 'current') {
+      drawRoundedRect(30, 30, width - 60, height - 60, 48, 'transparent', cardBorder, 3);
+
+      drawRoundedRect(60, 60, width - 120, 64, 32, cardBg, cardBorder, 1.5);
+      ctx.textAlign = 'right';
+      ctx.font = '900 24px Vazirmatn, sans-serif';
+      ctx.fillStyle = primaryTextColor;
+      ctx.fillText(`📱 جەتوەلا من — ${teacherName}`, width - 90, 102);
+
+      const nowTimeStr = `${effectiveTime.getHours().toString().padStart(2, '0')}:${effectiveTime.getMinutes().toString().padStart(2, '0')}:${effectiveTime.getSeconds().toString().padStart(2, '0')}`;
+      ctx.textAlign = 'left';
+      ctx.font = '700 22px Vazirmatn, monospace';
+      ctx.fillStyle = accentColor;
+      ctx.fillText(nowTimeStr, 90, 101);
+
+      drawRoundedRect(60, 150, width - 120, 400, 40, cardBg, cardBorder, 2);
+
+      const statusText = activeSlot ? "🟢 وانا کارایە" : (isBreak ? "☕ دەمێ فرسەتێ (پشوو)" : "🏁 دەرڤەی دەوامێ");
+      const statusBg = activeSlot ? "rgba(16, 185, 129, 0.25)" : (isBreak ? "rgba(245, 158, 11, 0.25)" : "rgba(100, 116, 139, 0.25)");
+      const statusBorder = activeSlot ? "#10b981" : (isBreak ? "#f59e0b" : "#64748b");
+      drawRoundedRect(width / 2 - 140, 180, 280, 52, 26, statusBg, statusBorder, 2);
+
+      ctx.textAlign = 'center';
+      ctx.font = '900 22px Vazirmatn, sans-serif';
+      ctx.fillStyle = primaryTextColor;
+      ctx.fillText(statusText, width / 2, 214);
+
+      ctx.font = '900 68px Vazirmatn, sans-serif';
+      ctx.fillStyle = primaryTextColor;
+      ctx.fillText(activeSlot ? activeSlot.className : (isBreak ? 'پشویا کورتا ماموستایی' : 'دەوام ب داوی هات'), width / 2, 315);
+
+      ctx.font = '700 26px Vazirmatn, sans-serif';
+      ctx.fillStyle = subTextColor;
+      if (activeSlot) {
+        ctx.fillText(`بابەت: ${activeSlot.subject || teacherSubject} | کات: ${activeSlot.startTime} — ${activeSlot.endTime}`, width / 2, 370);
+      } else {
+        ctx.fillText(`${activeDay} — ${teacherSubject}`, width / 2, 370);
+      }
+
+      drawRoundedRect(90, 415, width - 180, 105, 28, 'rgba(0, 0, 0, 0.35)', accentColor, 2);
+      ctx.font = '700 22px Vazirmatn, sans-serif';
+      ctx.fillStyle = subTextColor;
+      ctx.fillText("دەمێ مای بۆ زەنگا پاشتر:", width / 2, 450);
+
+      ctx.font = '900 42px Vazirmatn, monospace';
+      ctx.fillStyle = accentColor;
+      ctx.fillText(timeRemaining || "00:00", width / 2, 498);
+
+      drawRoundedRect(60, 570, width - 120, 160, 36, cardBg, cardBorder, 1.5);
+      ctx.textAlign = 'right';
+      ctx.font = '900 26px Vazirmatn, sans-serif';
+      ctx.fillStyle = primaryTextColor;
+      ctx.fillText("وانا پشتڕا (Next Lesson):", width - 100, 620);
+
+      ctx.font = '700 24px Vazirmatn, sans-serif';
+      ctx.fillStyle = nextLiveSlot ? accentColor : subTextColor;
+      ctx.fillText(
+        nextLiveSlot ? `${nextLiveSlot.className} (${nextLiveSlot.startTime} - ${nextLiveSlot.endTime})` : "هیچ وانەیەکی دیکە نییە بۆ ئەمڕۆ",
+        width - 100,
+        675
+      );
+    }
+    else if (style === 'today') {
+      drawRoundedRect(20, 20, width - 40, height - 40, 40, 'transparent', cardBorder, 3);
+
+      drawRoundedRect(40, 40, width - 80, 80, 28, cardBg, cardBorder, 1.5);
+      ctx.textAlign = 'right';
+      ctx.font = '900 32px Vazirmatn, sans-serif';
+      ctx.fillStyle = primaryTextColor;
+      ctx.fillText(`📅 جەتوەلا روژا (${activeDay}) — ${teacherName}`, width - 70, 92);
+
+      const nowTimeStr = `${effectiveTime.getHours().toString().padStart(2, '0')}:${effectiveTime.getMinutes().toString().padStart(2, '0')}`;
+      ctx.textAlign = 'left';
+      ctx.font = '900 30px Vazirmatn, monospace';
+      ctx.fillStyle = accentColor;
+      ctx.fillText(`🕒 ${nowTimeStr}`, 70, 92);
+
+      const slots = currentDayData?.slots || [];
+      const slotsCount = slots.length || 6;
+      const paddingX = 40;
+      const slotGap = 16;
+      const totalWidthForSlots = width - paddingX * 2;
+      const slotW = (totalWidthForSlots - slotGap * (slotsCount - 1)) / slotsCount;
+      const slotH = 380;
+      const slotY = 150;
+
+      slots.forEach((s, idx) => {
+        const xPos = width - paddingX - (idx + 1) * slotW - idx * slotGap;
+        const isActive = activeSlot?.id === s.id;
+        const isEmpty = s.className === 'بێ وانە';
+
+        const sFill = isActive ? 'rgba(99, 102, 241, 0.35)' : (isEmpty ? 'rgba(255, 255, 255, 0.03)' : cardBg);
+        const sStroke = isActive ? accentColor : (isEmpty ? 'rgba(255, 255, 255, 0.08)' : cardBorder);
+
+        drawRoundedRect(xPos, slotY, slotW, slotH, 24, sFill, sStroke, isActive ? 3 : 1.5);
+
+        drawRoundedRect(xPos + 12, slotY + 12, slotW - 24, 36, 14, isActive ? accentColor : 'rgba(255, 255, 255, 0.1)', undefined);
+        ctx.textAlign = 'center';
+        ctx.font = '900 18px Vazirmatn, sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(`و ${idx + 1}`, xPos + slotW / 2, slotY + 37);
+
+        if (!isEmpty) {
+          ctx.font = '900 24px Vazirmatn, sans-serif';
+          ctx.fillStyle = primaryTextColor;
+          const shortClass = s.className.replace('پۆلا ', '');
+          ctx.fillText(shortClass, xPos + slotW / 2, slotY + 140);
+
+          ctx.font = '700 16px Vazirmatn, sans-serif';
+          ctx.fillStyle = subTextColor;
+          ctx.fillText((s.subject || teacherSubject).slice(0, 8), xPos + slotW / 2, slotY + 185);
+
+          drawRoundedRect(xPos + 10, slotY + slotH - 70, slotW - 20, 50, 14, 'rgba(0, 0, 0, 0.3)', undefined);
+          ctx.font = '700 14px Vazirmatn, monospace';
+          ctx.fillStyle = isActive ? '#a5f3fc' : '#cbd5e1';
+          ctx.fillText(`${s.startTime}`, xPos + slotW / 2, slotY + slotH - 46);
+          ctx.fillText(`${s.endTime}`, xPos + slotW / 2, slotY + slotH - 26);
+        } else {
+          ctx.font = '700 16px Vazirmatn, sans-serif';
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+          ctx.fillText('بێ وانە', xPos + slotW / 2, slotY + 200);
+        }
+      });
+    }
+    else if (style === 'bar') {
+      drawRoundedRect(16, 16, width - 32, height - 32, 32, 'transparent', cardBorder, 2.5);
+      drawRoundedRect(32, 32, width - 64, height - 64, 24, cardBg, cardBorder, 1.5);
+
+      ctx.textAlign = 'right';
+      ctx.font = '900 28px Vazirmatn, sans-serif';
+      ctx.fillStyle = primaryTextColor;
+      ctx.fillText(`جەتوەلا من — ${teacherName}`, width - 70, 100);
+
+      ctx.font = '700 20px Vazirmatn, sans-serif';
+      ctx.fillStyle = subTextColor;
+      ctx.fillText(`${activeDay} | ${teacherSubject}`, width - 70, 150);
+
+      drawRoundedRect(width / 2 - 180, 50, 360, 155, 24, activeSlot ? 'rgba(99, 102, 241, 0.3)' : 'rgba(0,0,0,0.2)', accentColor, 2);
+
+      ctx.textAlign = 'center';
+      ctx.font = '900 20px Vazirmatn, sans-serif';
+      ctx.fillStyle = accentColor;
+      ctx.fillText(activeSlot ? "وانا نوکە:" : (isBreak ? "دەمێ فرسەتێ" : "بێ وانە"), width / 2, 85);
+
+      ctx.font = '900 38px Vazirmatn, sans-serif';
+      ctx.fillStyle = primaryTextColor;
+      ctx.fillText(activeSlot ? activeSlot.className : (isBreak ? 'پشوو' : 'دەوام ب داوی هات'), width / 2, 135);
+
+      ctx.font = '700 18px Vazirmatn, monospace';
+      ctx.fillStyle = subTextColor;
+      ctx.fillText(`مایە: ${timeRemaining || '00:00'}`, width / 2, 180);
+
+      const nowTimeStr = `${effectiveTime.getHours().toString().padStart(2, '0')}:${effectiveTime.getMinutes().toString().padStart(2, '0')}`;
+      ctx.textAlign = 'left';
+      ctx.font = '900 36px Vazirmatn, monospace';
+      ctx.fillStyle = primaryTextColor;
+      ctx.fillText(nowTimeStr, 70, 110);
+
+      ctx.font = '700 18px Vazirmatn, sans-serif';
+      ctx.fillStyle = subTextColor;
+      ctx.fillText(nextLiveSlot ? `پاشتر: ${nextLiveSlot.className}` : "وانە نەمایە", 70, 160);
+    }
+    else if (style === 'week') {
+      drawRoundedRect(20, 20, width - 40, height - 40, 48, 'transparent', cardBorder, 3);
+
+      drawRoundedRect(40, 40, width - 80, 100, 32, cardBg, cardBorder, 1.5);
+      ctx.textAlign = 'right';
+      ctx.font = '900 36px Vazirmatn, sans-serif';
+      ctx.fillStyle = primaryTextColor;
+      ctx.fillText(`خشتەیێ هەفتیانە — ${teacherName} (${teacherSubject})`, width - 80, 102);
+
+      const nowTimeStr = `${effectiveTime.getHours().toString().padStart(2, '0')}:${effectiveTime.getMinutes().toString().padStart(2, '0')}`;
+      ctx.textAlign = 'left';
+      ctx.font = '900 32px Vazirmatn, monospace';
+      ctx.fillStyle = accentColor;
+      ctx.fillText(`📱 ${nowTimeStr}`, 80, 102);
+
+      const daysList = DAYS.slice(0, 5);
+      const startY = 160;
+      const rowH = 180;
+      const rowGap = 16;
+
+      daysList.forEach((dayName, dIdx) => {
+        const ry = startY + dIdx * (rowH + rowGap);
+        const dayData = schedule[dayName];
+        const isCurrentDay = activeDay === dayName;
+
+        drawRoundedRect(40, ry, width - 80, rowH, 24, isCurrentDay ? 'rgba(99, 102, 241, 0.2)' : cardBg, isCurrentDay ? accentColor : cardBorder, isCurrentDay ? 2 : 1);
+
+        drawRoundedRect(width - 200, ry + 20, 140, rowH - 40, 18, isCurrentDay ? accentColor : 'rgba(255, 255, 255, 0.1)', undefined);
+        ctx.textAlign = 'center';
+        ctx.font = '900 22px Vazirmatn, sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(dayName.split(' ')[0], width - 130, ry + rowH / 2 + 8);
+
+        const slots = dayData?.slots || [];
+        const slotsCount = 6;
+        const totalWForSlots = width - 260 - 60;
+        const sW = (totalWForSlots - 10 * (slotsCount - 1)) / slotsCount;
+
+        for (let i = 0; i < slotsCount; i++) {
+          const slot = slots[i];
+          const sx = width - 230 - (i + 1) * sW - i * 10;
+          const isEmpty = !slot || slot.className === 'بێ وانە';
+
+          drawRoundedRect(sx, ry + 20, sW, rowH - 40, 16, isEmpty ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.08)', 'rgba(255,255,255,0.1)', 1);
+
+          ctx.textAlign = 'center';
+          ctx.font = '700 16px Vazirmatn, sans-serif';
+          ctx.fillStyle = subTextColor;
+          ctx.fillText(`و${i + 1}`, sx + sW / 2, ry + 48);
+
+          if (!isEmpty && slot) {
+            ctx.font = '900 20px Vazirmatn, sans-serif';
+            ctx.fillStyle = primaryTextColor;
+            ctx.fillText(slot.className.replace('پۆلا ', ''), sx + sW / 2, ry + 88);
+
+            ctx.font = '700 14px Vazirmatn, monospace';
+            ctx.fillStyle = accentColor;
+            ctx.fillText(slot.startTime, sx + sW / 2, ry + 124);
+          }
+        }
+      });
+    }
+  };
+
+  const renderWidgetCanvas = () => {
+    if (widgetCanvasRef.current) {
+      drawWidgetToCanvas(widgetCanvasRef.current, widgetStyle, widgetTheme);
+    }
+  };
+
+  const downloadWidgetImage = () => {
+    const canvas = widgetCanvasRef.current;
+    if (!canvas) return;
+    const url = canvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `widget_${widgetStyle}_${widgetTheme}.png`;
+    a.click();
+  };
+
+  const togglePipWidget = async () => {
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        setPipActive(false);
+        return;
+      }
+
+      let pipCanvas = pipCanvasRef.current;
+      if (!pipCanvas) {
+        pipCanvas = document.createElement('canvas');
+        pipCanvas.width = 800;
+        pipCanvas.height = 800;
+        pipCanvasRef.current = pipCanvas;
+      }
+
+      drawWidgetToCanvas(pipCanvas, widgetStyle, widgetTheme);
+
+      const stream = pipCanvas.captureStream(1);
+      let video = pipVideoRef.current;
+      if (!video) {
+        video = document.createElement('video');
+        video.muted = true;
+        video.playsInline = true;
+        pipVideoRef.current = video;
+      }
+
+      video.srcObject = stream;
+      await video.play();
+
+      if (document.pictureInPictureEnabled && video.requestPictureInPicture) {
+        await video.requestPictureInPicture();
+        setPipActive(true);
+
+        video.addEventListener('leavepictureinpicture', () => {
+          setPipActive(false);
+        });
+      } else {
+        alert("ئەم وێبگەڕە پشتیوانی لە Picture-in-Picture ناکات. تکایە Chrome لەسەر ئەندرۆید بەکاربهێنە.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert("خەلەتی ل ڤەکرنا ویجێتێ زێندە: " + (err?.message || "پشتیوانی ناکرێت"));
+    }
+  };
+
+  useEffect(() => {
+    if (showWidgetModal) {
+      renderWidgetCanvas();
+    }
+    if (pipActive && pipCanvasRef.current) {
+      drawWidgetToCanvas(pipCanvasRef.current, widgetStyle, widgetTheme);
+    }
+  }, [
+    showWidgetModal,
+    widgetStyle,
+    widgetTheme,
+    effectiveTime,
+    teacherName,
+    teacherSubject,
+    schedule,
+    activeDay,
+    timeRemaining,
+    currentLiveSlot,
+    nextLiveSlot,
+    pipActive
+  ]);
+
   // Bell scheduling loop
   useEffect(() => {
     if (!alarmSettings.enabled || manualTimeStr) return;
@@ -1564,6 +1977,183 @@ const App: React.FC = () => {
                 </button>
                 <button
                   onClick={() => setShowWallpaperModal(false)}
+                  className="py-4 px-6 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
+                >
+                  داخستن
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Home Screen Widget Studio Modal */}
+      {showWidgetModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/75 backdrop-blur-md p-4 overflow-y-auto">
+          <div className="bg-white rounded-[2.5rem] max-w-3xl w-full shadow-2xl overflow-hidden my-auto border border-slate-100 animate-in fade-in duration-200">
+            {/* Modal Header */}
+            <div className="p-6 border-b flex items-center justify-between bg-gradient-to-r from-amber-500 via-orange-600 to-indigo-600 text-white">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-white/20 backdrop-blur-sm rounded-2xl shadow-inner">
+                  <LayoutGrid className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-black text-lg text-white">ستودیۆیا ویجێتێن شاشەی (Home Screen Widgets)</h3>
+                  <p className="text-xs text-amber-100 font-medium">4 دیزاینێن ب کەیف بۆ دیارکرنا جەتوەلا وانان و کاتژمێرا مایی ل سەر شاشەیا مۆبایلێ</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowWidgetModal(false)}
+                className="p-2 hover:bg-white/20 rounded-full text-white/80 hover:text-white transition-all"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto no-scrollbar">
+              {/* Controls */}
+              <div className="space-y-4 bg-slate-50 p-4 rounded-3xl border border-slate-200">
+                {/* Style Selector */}
+                <div>
+                  <label className="text-xs font-black text-slate-700 block mb-2">هەڵبژارتنا دیزاینا ویجێتی (Widget Design Style):</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {[
+                      { id: 'current', label: '1. وانا نوکە (2x2 Live)', desc: 'کارتێ ڕاستەوخۆ' },
+                      { id: 'today', label: '2. جەتوەلا ئەڤڕۆ (4x2)', desc: 'وانێن ئەمڕۆ' },
+                      { id: 'bar', label: '3. شریطێ باریک (4x1)', desc: 'AMOLED Bar' },
+                      { id: 'week', label: '4. هەفتیانە (4x4 Grid)', desc: 'خشتەی گشتی' },
+                    ].map((st) => (
+                      <button
+                        key={st.id}
+                        onClick={() => {
+                          setWidgetStyle(st.id as any);
+                          setTimeout(renderWidgetCanvas, 50);
+                        }}
+                        className={`p-3 rounded-2xl text-right border transition-all flex flex-col justify-between ${
+                          widgetStyle === st.id
+                            ? 'bg-amber-600 text-white border-amber-600 shadow-md scale-105'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span className="font-black text-xs block">{st.label}</span>
+                        <span className={`text-[10px] font-bold mt-1 ${widgetStyle === st.id ? 'text-amber-100' : 'text-slate-400'}`}>
+                          {st.desc}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Theme Selector */}
+                <div>
+                  <label className="text-xs font-black text-slate-700 block mb-1.5">ڕەنگ و تیمی ویجێتی:</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {[
+                      { id: 'amoled', label: 'AMOLED Black (ڕەش)', bg: 'bg-slate-900 text-cyan-400 border-slate-700' },
+                      { id: 'glass', label: 'Glassmorphism (مۆر)', bg: 'bg-purple-950 text-purple-200 border-purple-800' },
+                      { id: 'indigo', label: 'Deep Indigo (شین)', bg: 'bg-indigo-900 text-white border-indigo-700' },
+                      { id: 'emerald', label: 'Emerald Green (کەسک)', bg: 'bg-emerald-900 text-emerald-200 border-emerald-700' },
+                    ].map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => {
+                          setWidgetTheme(t.id as any);
+                          setTimeout(renderWidgetCanvas, 50);
+                        }}
+                        className={`py-2.5 px-3 rounded-2xl text-xs font-black border transition-all ${t.bg} ${
+                          widgetTheme === t.id ? 'ring-2 ring-amber-500 ring-offset-2 scale-105 shadow-md' : 'opacity-80'
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* HD Widget Preview Canvas */}
+              <div className="flex flex-col items-center justify-center bg-slate-950 p-4 rounded-3xl border-4 border-slate-800 shadow-inner">
+                <p className="text-[11px] text-amber-300 font-bold mb-3 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  پێشبینینا ڕاستەوخۆ یا ویجێتی (Live High-DPI Widget Preview):
+                </p>
+                <div className="relative w-full max-w-lg overflow-hidden rounded-3xl border-2 border-slate-700 shadow-2xl bg-black flex items-center justify-center p-2">
+                  <canvas
+                    ref={widgetCanvasRef}
+                    className="w-full h-auto object-contain rounded-2xl cursor-pointer"
+                    title="کلیک بکە بۆ داگرتنا وێنەی"
+                    onClick={downloadWidgetImage}
+                  />
+                </div>
+              </div>
+
+              {/* Quick Floating PiP Live Widget Feature */}
+              <div className="p-4 rounded-3xl bg-gradient-to-r from-amber-500/10 via-indigo-500/10 to-purple-500/10 border-2 border-amber-300/50 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2.5 bg-amber-500 text-white rounded-2xl shadow-md">
+                      <MonitorPlay className="w-5 h-5 animate-pulse" />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-sm text-slate-900">ویجێتێ زێندە ل سەر شاشەی (Floating Live PiP Widget)</h4>
+                      <p className="text-[11px] text-slate-600 font-medium">پەنجەرەیەکی زێندە لەسەر هەموو بەرنامەکان دەخولێتەوە و خولەک ب خولەک نوێ دەبێتەوە!</p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={togglePipWidget}
+                    className={`px-4 py-2.5 rounded-2xl text-xs font-black shadow-md flex items-center gap-2 transition-all active:scale-95 ${
+                      pipActive
+                        ? 'bg-red-600 hover:bg-red-700 text-white animate-pulse'
+                        : 'bg-amber-600 hover:bg-amber-700 text-white'
+                    }`}
+                  >
+                    <MonitorPlay className="w-4 h-4" />
+                    <span>{pipActive ? 'ڕاوەستاندنا ویجێتێ زێندە' : '⚡ ڤەکرنا ویجێتێ زێندە'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Instructions on how to add to phone home screen */}
+              <div className="p-4 rounded-2xl bg-indigo-50/80 border border-indigo-100 text-xs font-bold text-indigo-950 space-y-3">
+                <p className="flex items-center gap-1.5 font-black text-indigo-950 text-sm">
+                  <Smartphone className="w-5 h-5 text-indigo-600" />
+                  چەوان ویجێتی بێخەمە سەر شاشەیا مۆبایلێ (How to add Widget to Home Screen)?
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] text-slate-700 leading-relaxed font-medium">
+                  <div className="p-3 bg-white rounded-xl border border-indigo-100 space-y-1">
+                    <span className="font-extrabold text-indigo-900 block text-xs">📱 ڕێکا 1: بەشی Widgets یێ مۆبایلێ (PWA Native):</span>
+                    <ol className="list-decimal list-inside space-y-1 pr-1">
+                      <li>کاتێک ئەپەکەت دابەزاندووە لەسەر مۆبایلەکەت (Install App).</li>
+                      <li>دەست لەسەر شاشەیا سەرەکی مۆبایلەکەت بگرە بۆ 2 چرکە.</li>
+                      <li>کلیک لە <b>Widgets (ویجێتەکان)</b> بکە و بگەڕێ بۆ <b>"جەتوەلا من"</b>.</li>
+                      <li>ویجێتەکە ڕابکێشە بۆ سەر شاشەی سەرەکی.</li>
+                    </ol>
+                  </div>
+
+                  <div className="p-3 bg-white rounded-xl border border-indigo-100 space-y-1">
+                    <span className="font-extrabold text-indigo-900 block text-xs">🎨 ڕێکا 2: بەکارهێنانا ئەپێن ویجێتی (Widget Launchers):</span>
+                    <ol className="list-decimal list-inside space-y-1 pr-1">
+                      <li>کلیک ل سەر دوگمەی <b>"داگرتنا وێنەیێ ویجێتی (HD PNG)"</b> بکە.</li>
+                      <li>له‌ ئه‌په‌كانی وه‌ك (KWGT, Widgetsmith, WebWidget) ئه‌م وێنه‌یه‌ دیاری بكه‌.</li>
+                      <li>ئێستا دەبێتە ویجێتێکی کەشخە ل سەر شاشەیا قوفل یان سەرەکی!</li>
+                    </ol>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  onClick={downloadWidgetImage}
+                  className="flex-1 py-4 rounded-2xl bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-black text-xs shadow-lg transition-all flex items-center justify-center gap-2"
+                >
+                  <Download className="w-5 h-5" />
+                  <span>داگرتنا وێنەیێ ویجێتی (HD PNG Exporter)</span>
+                </button>
+                <button
+                  onClick={() => setShowWidgetModal(false)}
                   className="py-4 px-6 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
                 >
                   داخستن
@@ -2703,6 +3293,19 @@ const App: React.FC = () => {
             >
               <Smartphone className="w-3.5 h-3.5 text-cyan-600" />
               <span>شاشەیا قوفلێ</span>
+            </button>
+
+            {/* Widget Studio Button */}
+            <button
+              onClick={() => {
+                setShowWidgetModal(true);
+                setTimeout(renderWidgetCanvas, 50);
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-black border border-amber-200 transition-all shadow-sm active:scale-95"
+              title="ویجێتێن شاشەی (Home Screen Widgets)"
+            >
+              <LayoutGrid className="w-3.5 h-3.5 text-amber-600" />
+              <span>ویجێتێن شاشەی (Widgets)</span>
             </button>
 
             {/* Gemini Timetable Extractor Button */}

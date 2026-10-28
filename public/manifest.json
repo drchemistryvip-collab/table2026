@@ -28,5 +28,53 @@
       "type": "image/png",
       "purpose": "maskable"
     }
+  ],
+  "widgets": [
+    {
+      "name": "وانا نوکە (Live Lesson Widget)",
+      "short_name": "وانا نوکە",
+      "description": "دیتنا وانا نوکە، ماموستا و دەمێ مایی",
+      "tag": "current-lesson-widget",
+      "template": "current-lesson-template",
+      "ms_ac_template": "widgets/current-lesson.json",
+      "screenshots": [
+        {
+          "src": "./icon-192.png",
+          "sizes": "192x192",
+          "label": "وانا نوکە"
+        }
+      ]
+    },
+    {
+      "name": "جەتوەلا ئەڤرو (Today Schedule Widget)",
+      "short_name": "جەتوەلا ئەڤرو",
+      "description": "دیارکرنا هەمی وانێن روژا ئەڤرو ب زێنیدی",
+      "tag": "today-schedule-widget",
+      "template": "today-schedule-template",
+      "ms_ac_template": "widgets/today-schedule.json",
+      "screenshots": [
+        {
+          "src": "./icon-192.png",
+          "sizes": "192x192",
+          "label": "جەتوەلا ئەڤرو"
+        }
+      ]
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "مۆدا زێندی (Live View)",
+      "short_name": "زێندی",
+      "description": "ڤەکرنا بەرنامەی ڕاستەوخۆ لە مۆدا زێندی",
+      "url": "./?mode=live",
+      "icons": [{ "src": "./icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "ویجێتێن شاشەی (Widgets)",
+      "short_name": "ویجێت",
+      "description": "ستودیۆیا ویجێتێن شاشەیا مۆبایلێ",
+      "url": "./?mode=widget",
+      "icons": [{ "src": "./icon-192.png", "sizes": "192x192" }]
+    }
   ]
 }
