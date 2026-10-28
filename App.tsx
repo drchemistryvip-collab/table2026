@@ -1960,10 +1960,11 @@ const App: React.FC = () => {
     try {
       let base64Data = "";
       let mimeTypeStr = "image/jpeg";
+      let extractedDataResult: any = null;
 
       if (useSample) {
         setAiImagePreview("/assets/aistudio/photo_2026-10-27_21-33-17_62edd79f.jpg");
-        extractedData = {
+        extractedDataResult = {
           teacherName: "م حسێن",
           subject: "کیمیا",
           lessonCountPerDay: 6,
@@ -1988,8 +1989,6 @@ const App: React.FC = () => {
       } else {
         throw new Error("تکایە وێنەیەک دیار بکە");
       }
-
-      let extractedDataResult: any = extractedData;
 
       if (!useSample) {
         // 1. Try server endpoint first (instantly bypassed on static host)
