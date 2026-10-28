@@ -60,7 +60,12 @@ import {
   Share2,
   ArrowDownToLine,
   Trash2,
-  FolderUp
+  FolderUp,
+  Key,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  ShieldCheck
 } from 'lucide-react';
 
 const DB_NAME = "TeacherHusseinVoiceDB_v6";
@@ -87,6 +92,71 @@ const getVoice = async (id: string): Promise<Uint8Array | null> => {
   const tx = db.transaction(STORE_NAME, "readonly");
   const request = tx.objectStore(STORE_NAME).get(id);
   return new Promise((resolve) => (request.onsuccess = () => resolve(request.result || null)));
+};
+
+// Dual Offline Backup Store (IndexedDB for App Data & Schedule)
+const BACKUP_DB_NAME = "TeacherHusseinBackupDB_v1";
+const BACKUP_STORE = "schedule_backup";
+
+const openBackupDB = (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(BACKUP_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(BACKUP_STORE)) {
+        request.result.createObjectStore(BACKUP_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const saveBackupData = async (key: string, data: any) => {
+  try {
+    const db = await openBackupDB();
+    const tx = db.transaction(BACKUP_STORE, "readwrite");
+    tx.objectStore(BACKUP_STORE).put(data, key);
+    return new Promise((resolve) => (tx.oncomplete = resolve));
+  } catch (e) {
+    console.warn("IndexedDB backup error:", e);
+  }
+};
+
+const getBackupData = async (key: string): Promise<any | null> => {
+  try {
+    const db = await openBackupDB();
+    const tx = db.transaction(BACKUP_STORE, "readonly");
+    const request = tx.objectStore(BACKUP_STORE).get(key);
+    return new Promise((resolve) => (request.onsuccess = () => resolve(request.result || null)));
+  } catch (e) {
+    console.warn("IndexedDB restore error:", e);
+    return null;
+  }
+};
+
+// Safe Merge Utility to prevent overwriting user schedule during app updates
+const mergeUserSchedule = (savedSchedule: WeekSchedule, initialTemplate: WeekSchedule): WeekSchedule => {
+  if (!savedSchedule || typeof savedSchedule !== 'object') return initialTemplate;
+  const merged: WeekSchedule = {};
+
+  DAYS.forEach((day) => {
+    const defaultDay = initialTemplate[day];
+    const savedDay = savedSchedule[day];
+
+    if (!savedDay) {
+      merged[day] = defaultDay;
+    } else {
+      merged[day] = {
+        ...defaultDay,
+        ...savedDay,
+        slots: Array.isArray(savedDay.slots) && savedDay.slots.length > 0
+          ? savedDay.slots
+          : defaultDay.slots,
+      };
+    }
+  });
+
+  return merged;
 };
 
 const getKurdishDayName = (date: Date = new Date()): string => {
@@ -137,6 +207,13 @@ const App: React.FC = () => {
   const [isStandalone, setIsStandalone] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [showInstallGuideModal, setShowInstallGuideModal] = useState(false);
+
+  // Custom Gemini API Key State
+  const [userApiKey, setUserApiKey] = useState<string>(() => localStorage.getItem('user_gemini_api_key') || '');
+  const [showApiKeyText, setShowApiKeyText] = useState<boolean>(false);
+
+  // Online / Offline Data Safety Status Toast State
+  const [onlineToast, setOnlineToast] = useState<string | null>(null);
 
   // AI Timetable Extraction Modal State
   const [showAiImportModal, setShowAiImportModal] = useState(false);
@@ -478,49 +555,115 @@ const App: React.FC = () => {
     if ("Notification" in window && Notification.permission !== "granted") {
       Notification.requestPermission();
     }
+
+    const handleOnline = () => {
+      setOnlineToast("📶 پەیوەندیا ئینتەرنێتێ ڤەگەڕیا — هەمی جەتوەل و داتایێن تە پاراستینە ✓");
+      setTimeout(() => setOnlineToast(null), 4000);
+    };
+
+    const handleOffline = () => {
+      setOnlineToast("⚡ مۆدا بێ ئینتەرنێت (ئۆفلاین) — هەمی کار و جەتوەلا تە سەیڤکرییە د ئامێرێ تە دا");
+      setTimeout(() => setOnlineToast(null), 4500);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   useEffect(() => {
-    const saved = localStorage.getItem('timetable_data');
-    const savedSettings = localStorage.getItem('alarm_settings_v9');
-    const savedView = localStorage.getItem('view_mode');
-    const savedGender = localStorage.getItem('voice_gender');
-    const savedScripts = localStorage.getItem('custom_scripts_v6');
-    const savedThemeId = localStorage.getItem('app_theme_id');
-    const savedTeacherName = localStorage.getItem('teacher_name');
-    const savedTeacherSubject = localStorage.getItem('teacher_subject');
-
-    if (savedTeacherName) setTeacherName(savedTeacherName);
-    if (savedTeacherSubject) setTeacherSubject(savedTeacherSubject);
-
-    if (saved) {
+    const initializeAppData = async () => {
       try {
-        setSchedule(JSON.parse(saved));
-      } catch (e) {}
-    }
-    if (savedSettings) {
-      try {
-        const parsed = JSON.parse(savedSettings);
-        setAlarmSettings({ ...DEFAULT_ALARM_SETTINGS, ...parsed });
-      } catch (e) {}
-    }
-    if (savedView === 'modern' || savedView === 'classic' || savedView === 'live') {
-      setViewMode(savedView as any);
-    }
-    if (savedGender === 'male' || savedGender === 'female') {
-      setVoiceGender(savedGender);
-    }
-    if (savedScripts) {
-      try {
-        setCustomScripts(JSON.parse(savedScripts));
-      } catch (e) {}
-    }
-    if (savedThemeId) {
-      const theme = THEMES.find((t) => t.id === savedThemeId);
-      if (theme) setActiveTheme(theme);
-    }
+        const saved = localStorage.getItem('timetable_data');
+        const savedSettings = localStorage.getItem('alarm_settings_v9');
+        const savedView = localStorage.getItem('view_mode');
+        const savedGender = localStorage.getItem('voice_gender');
+        const savedScripts = localStorage.getItem('custom_scripts_v6');
+        const savedThemeId = localStorage.getItem('app_theme_id');
+        const savedTeacherName = localStorage.getItem('teacher_name');
+        const savedTeacherSubject = localStorage.getItem('teacher_subject');
+        const savedApiKey = localStorage.getItem('user_gemini_api_key');
 
-    checkVoicesStatus();
+        let currentSchedule: WeekSchedule | null = null;
+        if (saved) {
+          try { currentSchedule = JSON.parse(saved); } catch (e) {}
+        }
+
+        // Fallback to IndexedDB backup if LocalStorage was cleared during browser updates
+        if (!currentSchedule) {
+          const idbSchedule = await getBackupData('timetable_data');
+          if (idbSchedule) {
+            currentSchedule = idbSchedule;
+            localStorage.setItem('timetable_data', JSON.stringify(idbSchedule));
+          }
+        }
+
+        if (currentSchedule) {
+          const safeSchedule = mergeUserSchedule(currentSchedule, INITIAL_SCHEDULE);
+          setSchedule(safeSchedule);
+          localStorage.setItem('timetable_data', JSON.stringify(safeSchedule));
+          saveBackupData('timetable_data', safeSchedule);
+        }
+
+        // Restore teacher info
+        let tName = savedTeacherName || await getBackupData('teacher_name');
+        let tSubject = savedTeacherSubject || await getBackupData('teacher_subject');
+        if (tName) {
+          setTeacherName(tName);
+          localStorage.setItem('teacher_name', tName);
+        }
+        if (tSubject) {
+          setTeacherSubject(tSubject);
+          localStorage.setItem('teacher_subject', tSubject);
+        }
+
+        // Restore alarm settings
+        if (savedSettings) {
+          try {
+            const parsed = JSON.parse(savedSettings);
+            setAlarmSettings({ ...DEFAULT_ALARM_SETTINGS, ...parsed });
+          } catch (e) {}
+        } else {
+          const idbSettings = await getBackupData('alarm_settings_v9');
+          if (idbSettings) {
+            setAlarmSettings({ ...DEFAULT_ALARM_SETTINGS, ...idbSettings });
+          }
+        }
+
+        if (savedView === 'modern' || savedView === 'classic' || savedView === 'live') {
+          setViewMode(savedView as any);
+        }
+        if (savedGender === 'male' || savedGender === 'female') {
+          setVoiceGender(savedGender);
+        }
+        if (savedScripts) {
+          try { setCustomScripts(JSON.parse(savedScripts)); } catch (e) {}
+        } else {
+          const idbScripts = await getBackupData('custom_scripts_v6');
+          if (idbScripts) setCustomScripts(idbScripts);
+        }
+        if (savedThemeId) {
+          const theme = THEMES.find((t) => t.id === savedThemeId);
+          if (theme) setActiveTheme(theme);
+        }
+        if (savedApiKey) {
+          setUserApiKey(savedApiKey);
+        } else {
+          const idbKey = await getBackupData('user_gemini_api_key');
+          if (idbKey) setUserApiKey(idbKey);
+        }
+      } catch (err) {
+        console.error("Data restore error:", err);
+      } finally {
+        checkVoicesStatus();
+      }
+    };
+
+    initializeAppData();
   }, []);
 
   const checkVoicesStatus = async () => {
@@ -1380,6 +1523,7 @@ const App: React.FC = () => {
         [dayName]: { ...currentDay, shift: newShift, slots: updatedSlots },
       };
       localStorage.setItem('timetable_data', JSON.stringify(updated));
+      saveBackupData('timetable_data', updated);
       return updated;
     });
   };
@@ -1401,7 +1545,7 @@ const App: React.FC = () => {
     return 'default';
   };
 
-  const saveToLocal = () => {
+  const saveToLocal = async () => {
     localStorage.setItem('timetable_data', JSON.stringify(schedule));
     localStorage.setItem('alarm_settings_v9', JSON.stringify(alarmSettings));
     localStorage.setItem('view_mode', viewMode);
@@ -1410,6 +1554,16 @@ const App: React.FC = () => {
     localStorage.setItem('app_theme_id', activeTheme.id);
     localStorage.setItem('teacher_name', teacherName);
     localStorage.setItem('teacher_subject', teacherSubject);
+    if (userApiKey) localStorage.setItem('user_gemini_api_key', userApiKey);
+
+    // Dual Backup Store in IndexedDB (Survives app updates & cache wipes)
+    await saveBackupData('timetable_data', schedule);
+    await saveBackupData('alarm_settings_v9', alarmSettings);
+    await saveBackupData('teacher_name', teacherName);
+    await saveBackupData('teacher_subject', teacherSubject);
+    await saveBackupData('custom_scripts_v6', customScripts);
+    await saveBackupData('user_gemini_api_key', userApiKey);
+
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 3000);
   };
@@ -1420,8 +1574,15 @@ const App: React.FC = () => {
       newDay.slots = newDay.slots.map((slot) => (slot.id === slotId ? { ...slot, ...updates } : slot));
       const updated = { ...prev, [dayName]: newDay };
       localStorage.setItem('timetable_data', JSON.stringify(updated));
+      saveBackupData('timetable_data', updated);
       return updated;
     });
+  };
+
+  const handleSaveApiKey = (key: string) => {
+    setUserApiKey(key);
+    localStorage.setItem('user_gemini_api_key', key);
+    saveBackupData('user_gemini_api_key', key);
   };
 
   // Secure Server-Side Voice Generation (Gemini TTS)
@@ -1431,7 +1592,7 @@ const App: React.FC = () => {
       const res = await fetch("/api/gemini/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voiceGender }),
+        body: JSON.stringify({ text, voiceGender, customApiKey: userApiKey }),
       });
       const data = await res.json();
       if (!res.ok || !data.success || !data.audioBase64) {
@@ -1470,7 +1631,7 @@ const App: React.FC = () => {
     setAiExtracting(true);
     setAiError(null);
     try {
-      let body: any = {};
+      let body: any = { customApiKey: userApiKey };
       if (useSample) {
         body.useSample = true;
         setAiImagePreview("/public/assets/aistudio/photo_2026-10-27_21-33-17_62edd79f.jpg");
@@ -1565,6 +1726,7 @@ const App: React.FC = () => {
         body: JSON.stringify({
           prompt: aiTimingPrompt,
           currentSettings: alarmSettings,
+          customApiKey: userApiKey,
         }),
       });
 
@@ -1673,6 +1835,14 @@ const App: React.FC = () => {
       style={{ '--primary-color': activeTheme.color } as React.CSSProperties}
       onClick={handleInteraction}
     >
+      {/* Online / Offline Data Protection Notification Toast */}
+      {onlineToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[200] bg-slate-900 text-white font-black text-xs px-5 py-3.5 rounded-2xl shadow-2xl border border-indigo-500/50 flex items-center gap-2.5 animate-in slide-in-from-top duration-300">
+          <ShieldCheck className="w-5 h-5 text-emerald-400 animate-pulse" />
+          <span>{onlineToast}</span>
+        </div>
+      )}
+
       {/* Alarm ringing full-screen modal */}
       {activeAlarm && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
@@ -2205,6 +2375,77 @@ const App: React.FC = () => {
 
             {/* Body */}
             <div className="p-6 overflow-y-auto space-y-6 no-scrollbar">
+              {/* Gemini API Key Box & Google AI Studio Direct Link */}
+              <div className="p-5 rounded-3xl bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white space-y-3.5 shadow-lg border border-purple-500/30">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Key className="w-5 h-5 text-yellow-400" />
+                    <h3 className="font-black text-sm text-white">تۆمارکرنا API Key یا Google AI Studio</h3>
+                  </div>
+                  {userApiKey ? (
+                    <span className="text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3" /> API Key یا تایبەت چالاکە
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2.5 py-0.5 rounded-full">
+                      سێرڤەرێ سەرەکی (سیستەم)
+                    </span>
+                  )}
+                </div>
+
+                {/* Google AI Studio Direct Link Button */}
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between p-3 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/20 transition-all text-xs font-bold text-yellow-300 group"
+                >
+                  <div className="flex items-center gap-2">
+                    <ExternalLink className="w-4 h-4 text-yellow-400 group-hover:scale-110 transition-transform" />
+                    <span>کۆپی و وەرگرتنا API Key ژ Google AI Studio (بەبێ بەرامبەر)</span>
+                  </div>
+                  <span className="text-[10px] bg-yellow-400 text-slate-950 font-black px-2.5 py-1 rounded-xl shadow-xs">
+                    کرنا لینکێ AI Studio ↗
+                  </span>
+                </a>
+
+                {/* API Key Input Box (لاکێشەک) */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] text-purple-200 font-extrabold block">
+                    لاکێشا لێدانا API Key (Copy & Paste):
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type={showApiKeyText ? "text" : "password"}
+                        value={userApiKey}
+                        onChange={(e) => handleSaveApiKey(e.target.value)}
+                        placeholder="AIzaSy... (API Key یێ خۆ لێرە کۆپی پاست بکە)"
+                        className="w-full text-xs p-3 pr-10 bg-black/40 border border-purple-400/40 rounded-2xl text-white font-mono placeholder:text-slate-400 outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowApiKeyText(!showApiKeyText)}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                        title={showApiKeyText ? "شاراوە بکە" : "دیار بکە"}
+                      >
+                        {showApiKeyText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+
+                    {userApiKey ? (
+                      <button
+                        onClick={() => handleSaveApiKey('')}
+                        className="px-3 py-3 rounded-2xl bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 text-xs font-bold transition-all"
+                        title="پاقژکرن"
+                      >
+                        پاقژکرن
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
               {/* Quick test with user's attached photo */}
               <div className="p-5 rounded-3xl bg-indigo-50/70 border-2 border-indigo-100">
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4">

@@ -14,22 +14,29 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-// Initialize GoogleGenAI server-side with required headers
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      "User-Agent": "aistudio-build",
+// Helper function to get GoogleGenAI client with optionally provided custom API key
+function getAIClient(customApiKey?: string) {
+  const key = (customApiKey && customApiKey.trim() !== "") ? customApiKey.trim() : process.env.GEMINI_API_KEY;
+  return new GoogleGenAI({
+    apiKey: key,
+    httpOptions: {
+      headers: {
+        "User-Agent": "aistudio-build",
+      },
     },
-  },
-});
+  });
+}
+
+// Default instance using environment variable
+const ai = getAIClient();
 
 /**
  * 1. Extract School Timetable from an Uploaded Image or from the sample attachment
  */
 app.post("/api/gemini/extract-schedule", async (req, res) => {
   try {
-    let { imageBase64, mimeType, useSample } = req.body;
+    let { imageBase64, mimeType, useSample, customApiKey, apiKey } = req.body;
+    const aiClient = getAIClient(customApiKey || apiKey);
 
     if (useSample || !imageBase64) {
       const samplePath = path.join(__dirname, "public/assets/aistudio/photo_2026-10-27_21-33-17_62edd79f.jpg");
@@ -91,7 +98,7 @@ Return ONLY a valid JSON object following this schema:
 }
 `;
 
-    const response = await ai.models.generateContent({
+    const response = await aiClient.models.generateContent({
       model: "gemini-3.8-flash",
       contents: {
         parts: [
@@ -139,10 +146,12 @@ Return ONLY a valid JSON object following this schema:
  */
 app.post("/api/gemini/parse-timing-command", async (req, res) => {
   try {
-    const { prompt, currentSettings } = req.body;
+    const { prompt, currentSettings, customApiKey, apiKey } = req.body;
     if (!prompt) {
       return res.status(400).json({ error: "Prompt is required" });
     }
+
+    const aiClient = getAIClient(customApiKey || apiKey);
 
     const systemInstruction = `
 You are an intelligent school bell & timetable configuration assistant for Kurdish schools (Badini / Sorani Kurdish).
@@ -178,7 +187,7 @@ Return JSON with this exact structure:
 }
 `;
 
-    const response = await ai.models.generateContent({
+    const response = await aiClient.models.generateContent({
       model: "gemini-3.8-flash",
       contents: prompt,
       config: {
@@ -201,14 +210,15 @@ Return JSON with this exact structure:
  */
 app.post("/api/gemini/tts", async (req, res) => {
   try {
-    const { text, voiceGender } = req.body;
+    const { text, voiceGender, customApiKey, apiKey } = req.body;
     if (!text) {
       return res.status(400).json({ error: "Text is required" });
     }
 
+    const aiClient = getAIClient(customApiKey || apiKey);
     const voiceName = voiceGender === "female" ? "Kore" : "Puck";
 
-    const response = await ai.models.generateContent({
+    const response = await aiClient.models.generateContent({
       model: "gemini-3.8-flash-lite-tts",
       contents: [
         {
