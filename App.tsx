@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { GoogleGenAI } from '@google/genai';
 import { 
   WeekSchedule, 
   LessonSlot, 
@@ -14,6 +15,216 @@ import {
   ShiftType 
 } from './types';
 import { INITIAL_SCHEDULE, VOICE_SCRIPTS, calculateSlotTimes, generateSlotsForDay } from './constants';
+
+const CLIENT_GEMINI_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-3.8-flash",
+  "gemini-2.5-pro",
+  "gemini-2.5-flash-lite",
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+  "gemini-2.0-flash",
+];
+
+const sanitizeApiKey = (key?: string) => {
+  if (!key) return '';
+  return key.replace(/^["']|["']$/g, '').trim();
+};
+
+const callClientGeminiValidate = async (apiKeyToUse: string) => {
+  const cleanKey = sanitizeApiKey(apiKeyToUse);
+  if (!cleanKey) {
+    throw new Error("تکایە API Key ل لاکێشا خوارێ بنڤێسە (Key is required)");
+  }
+  const aiClient = new GoogleGenAI({ apiKey: cleanKey });
+  let lastErr: any = null;
+  for (const m of CLIENT_GEMINI_MODELS) {
+    try {
+      const res = await aiClient.models.generateContent({
+        model: m,
+        contents: "Respond with OK to test key connection.",
+      });
+      if (res && res.text) {
+        return { valid: true, model: m };
+      }
+    } catch (err: any) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error("کلیل خەلەتە یان چالاک نینە");
+};
+
+const callClientGeminiExtract = async (apiKeyToUse: string, imageBase64Data: string, mimeTypeStr: string) => {
+  const cleanKey = sanitizeApiKey(apiKeyToUse);
+  if (!cleanKey) {
+    throw new Error("تکایە API Key بنڤێسە دا خشتەی بەرهەم بینیت");
+  }
+
+  let base64Clean = imageBase64Data;
+  if (base64Clean.includes(",")) {
+    base64Clean = base64Clean.split(",")[1];
+  }
+
+  const promptText = `
+You are an expert school timetable scanner and OCR analyzer specializing in Kurdish school schedules (Badini / Sorani).
+Look at this school timetable document/photo carefully.
+Extract:
+1. Teacher Name (e.g. "م حسین" or "ماموستا حسێن")
+2. Subject (e.g. "کیمیا", "فیزیا", "زیندەوەر", "بیرکاری", "زانست", "کوردی", "ئینگلێزی", "عەرەبی", "پەروەردەیا ئاینی", "کۆمپیوتەر", "مافێن مرۆڤی", "جێنۆساید", "وەرزش", "هونەر", "دەروونناسی", "کۆمەڵایەتی", "مێژوو", "جوگرافیا", "ئابووری", "فەلسەفە", etc.)
+3. The weekly schedule table:
+   Grades can range from Grade 1 to 12 (پۆلا 1 تا پۆلا 12) with sections A-Y (أ، ب، ج، د، هـ، و، ز، ح، ط...).
+   The rows represent days (in Kurdish / Arabic):
+   - ئێکشەمبی
+   - دووشەمبی
+   - سێشەمبی
+   - چوارشەمبی
+   - پێنچ شەمبی
+   The columns are lesson numbers: 1, 2, 3, 4, 5, 6 (or up to 8).
+   For each cell, extract the class/grade/section name (e.g. "10 - ب", "پۆلا 1 - أ", "پۆلا 12 - زانستی أ", etc.).
+   If a cell is blank or empty, write "بێ وانە".
+   Also note whether the shift seems to be morning ("morning") or evening ("evening").
+
+Return ONLY a valid JSON object following this schema:
+{
+  "teacherName": string,
+  "subject": string,
+  "lessonCountPerDay": number,
+  "days": [
+    {
+      "dayName": "ئێکشەمبی" | "دووشەمبی" | "سێشەمبی" | "چوارشەمبی" | "پێنچ شەمبی",
+      "shift": "morning" | "evening",
+      "lessons": string[]
+    }
+  ],
+  "notes": string
+}
+`;
+
+  const aiClient = new GoogleGenAI({ apiKey: cleanKey });
+  let lastErr: any = null;
+  for (const m of CLIENT_GEMINI_MODELS) {
+    try {
+      const res = await aiClient.models.generateContent({
+        model: m,
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                mimeType: mimeTypeStr || "image/jpeg",
+                data: base64Clean,
+              },
+            },
+            {
+              text: promptText,
+            },
+          ],
+        },
+        config: {
+          responseMimeType: "application/json",
+        },
+      });
+
+      if (res && res.text) {
+        const cleaned = res.text.replace(/```json/g, "").replace(/```/g, "").trim();
+        return JSON.parse(cleaned);
+      }
+    } catch (err: any) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error("دەرهێنانا خشتەی سەرکەوتوو نەبوو");
+};
+
+const callClientGeminiTiming = async (apiKeyToUse: string, promptStr: string, currentSettings: any) => {
+  const cleanKey = sanitizeApiKey(apiKeyToUse);
+  if (!cleanKey) {
+    throw new Error("تکایە API Key بنڤێسە");
+  }
+
+  const systemInstruction = `
+You are an intelligent school bell & timetable configuration assistant for Kurdish schools (Badini / Sorani Kurdish).
+The user wants to configure lesson durations, break timings, shift lengths, lesson counts, or exam mode.
+
+Analyze the user's Kurdish command: "${promptStr}".
+Existing settings context: ${JSON.stringify(currentSettings || {})}.
+
+Return JSON with this exact structure:
+{
+  "morningDuration": number,
+  "eveningDuration": number,
+  "lessonCount": number,
+  "defaultBreakDuration": number,
+  "longBreakLesson": number,
+  "longBreakDuration": number,
+  "examSettings": {
+    "enabled": boolean,
+    "examLessonNumber": number,
+    "examDuration": number,
+    "otherLessonsDuration": number,
+    "breakAfterExam": number
+  },
+  "summaryKurdish": string
+}
+`;
+
+  const aiClient = new GoogleGenAI({ apiKey: cleanKey });
+  let lastErr: any = null;
+  for (const m of CLIENT_GEMINI_MODELS) {
+    try {
+      const res = await aiClient.models.generateContent({
+        model: m,
+        contents: promptStr,
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+        },
+      });
+
+      if (res && res.text) {
+        const cleaned = res.text.replace(/```json/g, "").replace(/```/g, "").trim();
+        return JSON.parse(cleaned);
+      }
+    } catch (err: any) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error("گۆڕینی کاتەکان سەرکەوتوو نەبوو");
+};
+
+const callClientGeminiTts = async (apiKeyToUse: string, textStr: string, voiceGenderStr: string) => {
+  const cleanKey = sanitizeApiKey(apiKeyToUse);
+  if (!cleanKey) {
+    throw new Error("تکایە API Key بنڤێسە");
+  }
+
+  const voiceName = voiceGenderStr === "female" ? "Kore" : "Puck";
+  const aiClient = new GoogleGenAI({ apiKey: cleanKey });
+  let lastErr: any = null;
+  for (const m of ["gemini-2.5-flash", "gemini-3.8-flash-lite-tts", "gemini-2.5-flash-lite", "gemini-1.5-flash"]) {
+    try {
+      const res = await aiClient.models.generateContent({
+        model: m,
+        contents: [{ role: "user", parts: [{ text: textStr }] }],
+        config: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName },
+            },
+          },
+        },
+      });
+
+      const audioBase64 = res.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (audioBase64) {
+        return audioBase64;
+      }
+    } catch (err: any) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error("دروستکردنی دەنگ سەرکەوتوو نەبوو");
+};
 import { 
   Clock, 
   Save, 
@@ -233,23 +444,41 @@ const App: React.FC = () => {
     setKeyValidationStatus(null);
     setKeyValidationError(null);
     try {
-      const res = await fetch("/api/gemini/validate-key", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customApiKey: k }),
-      });
+      let isSuccess = false;
+      let errorMsg = "";
 
-      if (!res.headers.get("content-type")?.includes("application/json")) {
-        throw new Error("وەڵامی سێرڤەر نادیارە (HTML error page)");
+      // 1. Try server endpoint first
+      try {
+        const res = await fetch("/api/gemini/validate-key", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ customApiKey: k }),
+        });
+
+        if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
+          const data = await res.json();
+          if (data.valid) {
+            setKeyValidationStatus('valid');
+            return;
+          } else {
+            errorMsg = data.error || "کلیل خەلەتە یان چالاک نینە";
+          }
+        }
+      } catch (serverErr) {
+        // Server unavailable (e.g. GitHub Pages static host)
       }
 
-      const data = await res.json();
-      if (data.valid) {
+      // 2. Client-side fallback for GitHub Pages / static deployment
+      try {
+        await callClientGeminiValidate(k);
         setKeyValidationStatus('valid');
-      } else {
-        setKeyValidationStatus('invalid');
-        setKeyValidationError(data.error || "کلیل خەلەتە یان چالاک نینە");
+        return;
+      } catch (clientErr: any) {
+        errorMsg = clientErr?.message || errorMsg || "کلیل خەلەتە یان چالاک نینە";
       }
+
+      setKeyValidationStatus('invalid');
+      setKeyValidationError(errorMsg);
     } catch (err: any) {
       setKeyValidationStatus('invalid');
       setKeyValidationError(err?.message || "کێشەیەک لە پەیوەندی دروست بوو");
@@ -1621,21 +1850,37 @@ const App: React.FC = () => {
     saveBackupData('user_gemini_api_key', key);
   };
 
-  // Secure Server-Side Voice Generation (Gemini TTS)
+  // Secure Server-Side & Client-Side Fallback Voice Generation (Gemini TTS)
   const generateAndStoreVoice = async (id: string, text: string) => {
     setGeneratingId(id);
     try {
-      const res = await fetch("/api/gemini/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voiceGender, customApiKey: userApiKey }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success || !data.audioBase64) {
-        throw new Error(data.error || "Failed to generate speech");
+      let base64Audio = "";
+
+      // 1. Try server endpoint first
+      try {
+        const res = await fetch("/api/gemini/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, voiceGender, customApiKey: userApiKey }),
+        });
+        if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
+          const data = await res.json();
+          if (data.success && data.audioBase64) {
+            base64Audio = data.audioBase64;
+          }
+        }
+      } catch (sErr) {}
+
+      // 2. Client-side fallback for GitHub Pages / static hosting
+      if (!base64Audio) {
+        base64Audio = await callClientGeminiTts(userApiKey, text, voiceGender);
       }
 
-      const binaryString = atob(data.audioBase64);
+      if (!base64Audio) {
+        throw new Error("Failed to generate speech");
+      }
+
+      const binaryString = atob(base64Audio);
       const bytes = new Uint8Array(binaryString.length);
       for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
       await saveVoice(id, bytes);
@@ -1662,46 +1907,68 @@ const App: React.FC = () => {
     }
   };
 
-  // Extract Timetable with Gemini API
+  // Extract Timetable with Gemini API (Supports Express backend & GitHub Pages client fallback)
   const handleExtractFromImage = async (useSample: boolean = false, file?: File) => {
     setAiExtracting(true);
     setAiError(null);
     try {
-      let body: any = { customApiKey: userApiKey };
+      let base64Data = "";
+      let mimeTypeStr = "image/jpeg";
+
       if (useSample) {
-        body.useSample = true;
         setAiImagePreview("/assets/aistudio/photo_2026-10-27_21-33-17_62edd79f.jpg");
+        const resp = await fetch("/assets/aistudio/photo_2026-10-27_21-33-17_62edd79f.jpg");
+        const blob = await resp.blob();
+        base64Data = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        });
+        mimeTypeStr = blob.type || "image/jpeg";
       } else if (file) {
         const reader = new FileReader();
-        const base64Promise = new Promise<string>((resolve, reject) => {
+        base64Data = await new Promise<string>((resolve, reject) => {
           reader.onload = () => resolve(reader.result as string);
           reader.onerror = reject;
         });
         reader.readAsDataURL(file);
-        const base64Data = await base64Promise;
         setAiImagePreview(base64Data);
-        body.imageBase64 = base64Data;
-        body.mimeType = file.type || "image/jpeg";
+        mimeTypeStr = file.type || "image/jpeg";
       } else {
         throw new Error("تکایە وێنەیەک دیار بکە");
       }
 
-      const res = await fetch("/api/gemini/extract-schedule", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      let extractedData: any = null;
 
-      if (!res.headers.get("content-type")?.includes("application/json")) {
-        throw new Error("سێرڤەر وەڵامێکی نادیاری داوە (Non-JSON HTML error). تکایە تکا دەکەین API Key تاقی بکەرەوە.");
+      // 1. Try server endpoint first
+      try {
+        const res = await fetch("/api/gemini/extract-schedule", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageBase64: base64Data,
+            mimeType: mimeTypeStr,
+            customApiKey: userApiKey,
+          }),
+        });
+
+        if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
+          const json = await res.json();
+          if (json.success && json.data) {
+            extractedData = json.data;
+          }
+        }
+      } catch (sErr) {}
+
+      // 2. Client-side direct fallback for GitHub Pages static host
+      if (!extractedData) {
+        extractedData = await callClientGeminiExtract(userApiKey, base64Data, mimeTypeStr);
       }
 
-      const json = await res.json();
-      if (!res.ok || !json.success || !json.data) {
-        throw new Error(json.error || "شکست لە دەرهێنانا خشتەی");
+      if (!extractedData) {
+        throw new Error("شکست لە دەرهێنانا خشتەی بە هۆی بەردەستنەبوونی API Key");
       }
 
-      const extractedData = json.data;
       setAiPreviewData(extractedData);
 
       // Auto apply teacher name & subject if found
@@ -1716,7 +1983,7 @@ const App: React.FC = () => {
         saveBackupData('teacher_subject', extractedData.subject.trim());
       }
 
-      // Automatically apply extracted schedule immediately as requested!
+      // Automatically apply extracted schedule immediately!
       applyExtractedScheduleData(extractedData);
     } catch (err: any) {
       console.error(err);
@@ -1775,28 +2042,44 @@ const App: React.FC = () => {
 
   const applyExtractedSchedule = () => applyExtractedScheduleData();
 
-  // Parse natural language command for timing with Gemini
+  // Parse natural language command for timing with Gemini (Server & Client Fallback)
   const handleAiTimingCommand = async () => {
     if (!aiTimingPrompt.trim()) return;
     setAiTimingLoading(true);
     setAiTimingFeedback(null);
     try {
-      const res = await fetch("/api/gemini/parse-timing-command", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: aiTimingPrompt,
-          currentSettings: alarmSettings,
-          customApiKey: userApiKey,
-        }),
-      });
+      let parsedSettings: any = null;
 
-      const json = await res.json();
-      if (!res.ok || !json.success || !json.settings) {
-        throw new Error(json.error || "نەهاتە تێگەهشتن");
+      // 1. Try server endpoint first
+      try {
+        const res = await fetch("/api/gemini/parse-timing-command", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: aiTimingPrompt,
+            currentSettings: alarmSettings,
+            customApiKey: userApiKey,
+          }),
+        });
+
+        if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
+          const json = await res.json();
+          if (json.success && json.settings) {
+            parsedSettings = json.settings;
+          }
+        }
+      } catch (sErr) {}
+
+      // 2. Client-side fallback for GitHub Pages
+      if (!parsedSettings) {
+        parsedSettings = await callClientGeminiTiming(userApiKey, aiTimingPrompt, alarmSettings);
       }
 
-      const p = json.settings;
+      if (!parsedSettings) {
+        throw new Error("نەهاتە تێگەهشتن");
+      }
+
+      const p = parsedSettings;
       const updated: AlarmSettings = {
         ...alarmSettings,
         morningDuration: p.morningDuration ?? alarmSettings.morningDuration,
