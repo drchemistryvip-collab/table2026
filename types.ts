@@ -142,3 +142,47 @@ export const THEMES = [
 export const ALARM_SOUNDS = [
   { name: 'جەرەسێ قوتابخانێ', url: 'https://assets.mixkit.co/active_storage/sfx/2558/2558-preview.mp3' },
 ];
+
+export interface TeacherTimetableDoc {
+  id: string;
+  teacherName: string;
+  subject: string;
+  lessonCountPerDay?: number;
+  schedule: WeekSchedule;
+  notes?: string;
+  updatedAt?: string;
+  createdBy?: string;
+}
+
+export interface SwapStep {
+  stepNumber: number;
+  teacherName: string;
+  subject: string;
+  fromLesson: number;
+  toLesson: number;
+  className: string;
+  actionKurdish: string;
+}
+
+export interface SwapSuggestion {
+  id: string;
+  type: 'direct' | 'chain' | 'multi_chain';
+  teacherCount: number;
+  dayName: string;
+  sourceLessonIndex: number; // 0-indexed
+  targetLessonIndex: number; // 0-indexed
+  teacherA: string;
+  classNameToMove: string;
+  partnerTeacher1: string;
+  partnerSubject1: string;
+  partnerClass1?: string;
+  partnerTeacher2?: string;
+  partnerSubject2?: string;
+  partnerClass2?: string;
+  partnerTeacher3?: string;
+  partnerSubject3?: string;
+  partnerClass3?: string;
+  steps: SwapStep[];
+  detailsKurdish: string;
+}
+

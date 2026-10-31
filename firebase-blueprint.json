@@ -1,0 +1,43 @@
+{
+  "entities": {
+    "TeacherSchedule": {
+      "title": "Teacher Schedule",
+      "description": "School timetable schedule for a specific teacher",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier / teacher ID" },
+        "teacherName": { "type": "string", "description": "Full name of the teacher" },
+        "subject": { "type": "string", "description": "Main subject taught by teacher" },
+        "lessonCountPerDay": { "type": "number", "description": "Number of periods per day" },
+        "days": { "type": "array", "description": "Array of 5 day schedules" },
+        "notes": { "type": "string", "description": "Notes or comments" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp string" },
+        "createdBy": { "type": "string", "description": "Creator ID" }
+      },
+      "required": ["id", "teacherName", "subject", "days"]
+    },
+    "AppConfig": {
+      "title": "Global App Settings",
+      "description": "Global timing and app configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Config ID" },
+        "morningDuration": { "type": "number" },
+        "eveningDuration": { "type": "number" },
+        "lessonCount": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id"]
+    }
+  },
+  "firestore": {
+    "/timetables/{timetableId}": {
+      "schema": "TeacherSchedule",
+      "description": "Collection of teacher schedules"
+    },
+    "/config/{configId}": {
+      "schema": "AppConfig",
+      "description": "Collection of global app configuration documents"
+    }
+  }
+}

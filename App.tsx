@@ -266,6 +266,17 @@ const callClientGeminiTts = async (apiKeyToUse: string, textStr: string, voiceGe
   }
   throw lastErr || new Error("دروستکردنی دەنگ سەرکەوتوو نەبوو");
 };
+import { collection, onSnapshot } from 'firebase/firestore';
+import { 
+  db, 
+  TIMETABLES_COLLECTION, 
+  fetchTimetablesFromFirestore, 
+  saveTimetableToFirestore, 
+  batchSaveTimetablesToFirestore, 
+  deleteTimetableFromFirestore 
+} from './firebase';
+import { TeacherTimetableDoc, SwapSuggestion } from './types';
+
 import { 
   Clock, 
   Save, 
@@ -317,8 +328,21 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
-  ShieldCheck
+  ShieldCheck,
+  Shuffle,
+  Lock,
+  Unlock,
+  ShieldAlert,
+  FileText,
+  Layers,
+  Building2,
+  Users,
+  CheckSquare,
+  Code,
+  Copy,
+  Menu
 } from 'lucide-react';
+
 
 const DB_NAME = "TeacherHusseinVoiceDB_v6";
 const STORE_NAME = "voices";
@@ -411,6 +435,65 @@ const mergeUserSchedule = (savedSchedule: WeekSchedule, initialTemplate: WeekSch
   return merged;
 };
 
+const DEFAULT_SEED_TEACHERS: TeacherTimetableDoc[] = [
+  {
+    id: 'teacher_hussein',
+    teacherName: 'م حسێن',
+    subject: 'کیمیا',
+    lessonCountPerDay: 6,
+    schedule: INITIAL_SCHEDULE,
+    notes: 'م حسێن - کیمیا',
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'teacher_ahmad',
+    teacherName: 'م. ئەحمەد',
+    subject: 'فیزیا',
+    lessonCountPerDay: 6,
+    schedule: {
+      'ئێکشەمبی': { dayName: 'ئێکشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - د', '10 - ب', 'بێ وانە', '10 - و', 'بێ وانە', '10 - هـ']) },
+      'دووشەمبی': { dayName: 'دووشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - هـ', 'بێ وانە', '10 - ج', '10 - ب', 'بێ وانە', '10 - و']) },
+      'سێشەمبی': { dayName: 'سێشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - و', '10 - هـ', 'بێ وانە', '10 - د', 'بێ وانە', '10 - ج']) },
+      'چوارشەمبی': { dayName: 'چوارشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - ب', '10 - د', 'بێ وانە', '10 - هـ', '10 - ج', '10 - و']) },
+      'پێنچ شەمبی': { dayName: 'پێنچ شەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - د', '10 - و', 'بێ وانە', '10 - ب', 'بێ وانە', '10 - هـ']) }
+    },
+    notes: 'م. ئەحمەد - فیزیا',
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'teacher_araz',
+    teacherName: 'م. ئاراز',
+    subject: 'بیرکاری',
+    lessonCountPerDay: 6,
+    schedule: {
+      'ئێکشەمبی': { dayName: 'ئێکشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - ج', 'بێ وانە', '10 - ب', '10 - د', 'بێ وانە', '10 - هـ']) },
+      'دووشەمبی': { dayName: 'دووشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - د', '10 - ج', 'بێ وانە', '10 - و', 'بێ وانە', '10 - ب']) },
+      'سێشەمبی': { dayName: 'سێشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - ب', '10 - د', 'بێ وانە', '10 - ج', 'بێ وانە', '10 - و']) },
+      'چوارشەمبی': { dayName: 'چوارشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - ج', '10 - و', 'بێ وانە', '10 - د', '10 - هـ', '10 - ب']) },
+      'پێنچ شەمبی': { dayName: 'پێنچ شەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - و', '10 - ب', 'بێ وانە', '10 - ج', 'بێ وانە', '10 - د']) }
+    },
+    notes: 'م. ئاراز - بیرکاری',
+    updatedAt: new Date().toISOString()
+  }
+];
+
+const OFFLINE_TEACHERS_STORAGE_KEY = 'offline_all_teachers_cache_v3';
+
+const getInitialAllTeachersList = (): TeacherTimetableDoc[] => {
+  try {
+    const cached = localStorage.getItem(OFFLINE_TEACHERS_STORAGE_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn("Failed reading cached teachers list:", err);
+  }
+  return DEFAULT_SEED_TEACHERS;
+};
+
 const getKurdishDayName = (date: Date = new Date()): string => {
   const day = date.getDay(); // 0: Sunday, 1: Monday, 2: Tuesday, 3: Wednesday, 4: Thursday, 5: Friday, 6: Saturday
   switch (day) {
@@ -439,7 +522,16 @@ const getFormattedFullKurdishDate = (date: Date = new Date()): string => {
 };
 
 const App: React.FC = () => {
-  const [schedule, setSchedule] = useState<WeekSchedule>(INITIAL_SCHEDULE);
+  const [schedule, setSchedule] = useState<WeekSchedule>(() => {
+    try {
+      const saved = localStorage.getItem('timetable_data');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch (e) {}
+    return INITIAL_SCHEDULE;
+  });
   const [activeDay, setActiveDay] = useState<string>(getKurdishDayName(new Date()));
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const [isSaved, setIsSaved] = useState<boolean>(false);
@@ -451,8 +543,8 @@ const App: React.FC = () => {
   const [readyVoices, setReadyVoices] = useState<string[]>([]);
   const [voiceGender, setVoiceGender] = useState<'male' | 'female'>('male');
   const [customScripts, setCustomScripts] = useState<Record<string, string>>(VOICE_SCRIPTS);
-  const [teacherName, setTeacherName] = useState<string>("ماموستا حوسێن");
-  const [teacherSubject, setTeacherSubject] = useState<string>("کیمیا");
+  const [teacherName, setTeacherName] = useState<string>(() => localStorage.getItem('teacher_name') || "ماموستا حوسێن");
+  const [teacherSubject, setTeacherSubject] = useState<string>(() => localStorage.getItem('teacher_subject') || "کیمیا");
   const [activeTheme, setActiveTheme] = useState(THEMES[0]);
 
   // PWA Install & Platform Detection
@@ -572,8 +664,56 @@ const App: React.FC = () => {
   const pipCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pipVideoRef = useRef<HTMLVideoElement | null>(null);
 
+  // Multi-Teacher & Firestore Sync State (100% Offline Cached)
+  const [allTeachersList, setAllTeachersList] = useState<TeacherTimetableDoc[]>(getInitialAllTeachersList);
+  const [selectedTeacherId, setSelectedTeacherId] = useState<string>(() => localStorage.getItem('selected_teacher_id') || 'teacher_hussein');
+  const [showTeacherSelectModal, setShowTeacherSelectModal] = useState<boolean>(() => !localStorage.getItem('selected_teacher_id'));
+  const [teacherSearchTerm, setTeacherSearchTerm] = useState<string>('');
+  const [selectedGradeFilter, setSelectedGradeFilter] = useState<string>('all');
+  const [selectedSectionFilter, setSelectedSectionFilter] = useState<string>('all');
+
+
+  // Top Header Quick Search & Mobile Drawer Navigation
+  const [headerSearchQuery, setHeaderSearchQuery] = useState<string>('');
+  const [showHeaderSearchResults, setShowHeaderSearchResults] = useState<boolean>(false);
+  const [selectedLookupTeacher, setSelectedLookupTeacher] = useState<TeacherTimetableDoc | null>(null);
+  const [showTeacherStatusModal, setShowTeacherStatusModal] = useState<boolean>(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState<boolean>(false);
+
+  // Smart Period Swap Engine State
+  const [showSwapModal, setShowSwapModal] = useState<boolean>(false);
+  const [swapSourceDay, setSwapSourceDay] = useState<string>(DAYS[0]);
+  const [swapSourceLessonIndex, setSwapSourceLessonIndex] = useState<number>(0);
+  const [swapTargetLessonIndex, setSwapTargetLessonIndex] = useState<number>(1);
+  const [swapSelectedGrade, setSwapSelectedGrade] = useState<string>('auto');
+  const [swapSelectedSection, setSwapSelectedSection] = useState<string>('auto');
+  const [swapSuggestions, setSwapSuggestions] = useState<SwapSuggestion[]>([]);
+  const [swapLoading, setSwapLoading] = useState<boolean>(false);
+  const [swapExecutingId, setSwapExecutingId] = useState<string | null>(null);
+
+  // Admin Management & Mass Import/Export State
+  const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(false);
+  const [adminPinInput, setAdminPinInput] = useState<string>('');
+  const [adminPinError, setAdminPinError] = useState<string | null>(null);
+  const [adminBatchPreview, setAdminBatchPreview] = useState<TeacherTimetableDoc[]>([]);
+  const [adminBatchLoading, setAdminBatchLoading] = useState<boolean>(false);
+  const [adminSuccessMsg, setAdminSuccessMsg] = useState<string | null>(null);
+  const [adminCodeInput, setAdminCodeInput] = useState<string>('');
+  const [adminImportTab, setAdminImportTab] = useState<'code' | 'file' | 'edit'>('edit');
+
+  // Admin Direct Timetable Editor State
+  const [adminEditingTeacher, setAdminEditingTeacher] = useState<TeacherTimetableDoc | null>(null);
+  const [adminEditingSchedule, setAdminEditingSchedule] = useState<WeekSchedule | null>(null);
+  const [adminEditingName, setAdminEditingName] = useState<string>('');
+  const [adminEditingSubject, setAdminEditingSubject] = useState<string>('');
+  const [adminSavingLoading, setAdminSavingLoading] = useState<boolean>(false);
+  const [adminTeacherSearch, setAdminTeacherSearch] = useState<string>('');
+
   const toggleViewMode = () => setViewMode((prev) => (prev === 'modern' ? 'classic' : 'modern'));
   const currentDayData = schedule[activeDay] || schedule[DAYS[0]];
+
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const currentSourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
@@ -598,6 +738,739 @@ const App: React.FC = () => {
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // 1. Instant Restore from IndexedDB on Boot if larger offline set exists
+  useEffect(() => {
+    const restoreOfflineTeachersFromIDB = async () => {
+      try {
+        const idbData = await getBackupData(OFFLINE_TEACHERS_STORAGE_KEY);
+        if (Array.isArray(idbData) && idbData.length > 0) {
+          setAllTeachersList((prev) => (idbData.length >= prev.length ? idbData : prev));
+          try {
+            localStorage.setItem(OFFLINE_TEACHERS_STORAGE_KEY, JSON.stringify(idbData));
+          } catch (e) {}
+        }
+      } catch (err) {
+        console.warn("Error restoring offline teachers from IndexedDB:", err);
+      }
+    };
+    restoreOfflineTeachersFromIDB();
+  }, []);
+
+  // 2. Real-time Firestore sync with dual persistent offline storage
+  useEffect(() => {
+    let unsub: (() => void) | null = null;
+    try {
+      unsub = onSnapshot(collection(db, TIMETABLES_COLLECTION), async (snapshot) => {
+        const list: TeacherTimetableDoc[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push({ id: docSnap.id, ...(docSnap.data() as any) });
+        });
+
+        if (list.length === 0) {
+          // Seed default timetables if collection is empty
+          await batchSaveTimetablesToFirestore(DEFAULT_SEED_TEACHERS);
+          setAllTeachersList(DEFAULT_SEED_TEACHERS);
+          try {
+            localStorage.setItem(OFFLINE_TEACHERS_STORAGE_KEY, JSON.stringify(DEFAULT_SEED_TEACHERS));
+            saveBackupData(OFFLINE_TEACHERS_STORAGE_KEY, DEFAULT_SEED_TEACHERS);
+          } catch (e) {}
+        } else {
+          setAllTeachersList(list);
+          try {
+            localStorage.setItem(OFFLINE_TEACHERS_STORAGE_KEY, JSON.stringify(list));
+            saveBackupData(OFFLINE_TEACHERS_STORAGE_KEY, list);
+          } catch (e) {
+            saveBackupData(OFFLINE_TEACHERS_STORAGE_KEY, list);
+          }
+        }
+      }, (err) => {
+        console.warn("Firestore snapshot listener (offline mode active):", err);
+      });
+    } catch (e) {
+      console.warn("Snapshot setup error:", e);
+    }
+    return () => { if (unsub) unsub(); };
+  }, []);
+
+  // Sync selected teacher profile from allTeachersList
+  useEffect(() => {
+    if (allTeachersList.length > 0 && selectedTeacherId) {
+      const activeDoc = allTeachersList.find(t => t.id === selectedTeacherId || t.teacherName === selectedTeacherId);
+      if (activeDoc) {
+        setTeacherName(activeDoc.teacherName);
+        setTeacherSubject(activeDoc.subject || 'کیمیا');
+        setSchedule(activeDoc.schedule);
+        localStorage.setItem('timetable_data', JSON.stringify(activeDoc.schedule));
+        localStorage.setItem('teacher_name', activeDoc.teacherName);
+        localStorage.setItem('teacher_subject', activeDoc.subject || 'کیمیا');
+        saveBackupData('timetable_data', activeDoc.schedule);
+        saveBackupData('teacher_name', activeDoc.teacherName);
+        saveBackupData('teacher_subject', activeDoc.subject || 'کیمیا');
+      }
+    }
+  }, [allTeachersList, selectedTeacherId]);
+
+  const selectTeacherProfile = (teacherDoc: TeacherTimetableDoc) => {
+    setSelectedTeacherId(teacherDoc.id);
+    setTeacherName(teacherDoc.teacherName);
+    setTeacherSubject(teacherDoc.subject || 'کیمیا');
+    setSchedule(teacherDoc.schedule);
+    localStorage.setItem('selected_teacher_id', teacherDoc.id);
+    localStorage.setItem('teacher_name', teacherDoc.teacherName);
+    localStorage.setItem('teacher_subject', teacherDoc.subject || 'کیمیا');
+    localStorage.setItem('timetable_data', JSON.stringify(teacherDoc.schedule));
+    saveBackupData('selected_teacher_id', teacherDoc.id);
+    saveBackupData('teacher_name', teacherDoc.teacherName);
+    saveBackupData('teacher_subject', teacherDoc.subject || 'کیمیا');
+    saveBackupData('timetable_data', teacherDoc.schedule);
+    setShowTeacherSelectModal(false);
+  };
+
+  // Smart Period Swap Search Logic (Strict Grade & Section Matching, 1-to-4 Teacher Multi-Step Chain Swaps)
+  const findSwapSuggestions = () => {
+    if (!allTeachersList.length || !selectedTeacherId) return;
+    setSwapLoading(true);
+
+    const activeDoc = allTeachersList.find(t => t.id === selectedTeacherId || t.teacherName === selectedTeacherId);
+    if (!activeDoc) {
+      setSwapLoading(false);
+      return;
+    }
+
+    const teacherAName = activeDoc.teacherName;
+    const teacherASubject = activeDoc.subject || 'کیمیا';
+    const daySched = activeDoc.schedule[swapSourceDay];
+    if (!daySched || !daySched.slots) {
+      setSwapLoading(false);
+      return;
+    }
+
+    const sourceSlot = daySched.slots[swapSourceLessonIndex];
+    const rawClassToMove = sourceSlot?.className || 'بێ وانە';
+
+    if (rawClassToMove === 'بێ وانە' || rawClassToMove === 'فەراغ') {
+      setSwapSuggestions([]);
+      setSwapLoading(false);
+      return;
+    }
+
+    const parsedSource = parseClassAndSection(rawClassToMove);
+    const targetGrade = (swapSelectedGrade && swapSelectedGrade !== 'auto') 
+      ? (swapSelectedGrade.startsWith('پۆلا') ? swapSelectedGrade : `پۆلا ${swapSelectedGrade}`)
+      : parsedSource.grade;
+
+    const targetSection = (swapSelectedSection && swapSelectedSection !== 'auto')
+      ? (swapSelectedSection.startsWith('هۆبەیا') ? swapSelectedSection : `هۆبەیا (${swapSelectedSection})`)
+      : parsedSource.section;
+
+    const suggestions: SwapSuggestion[] = [];
+
+    // LEVEL 1: 1-Teacher Direct Swaps
+    allTeachersList.forEach((tB) => {
+      if (tB.teacherName === teacherAName) return;
+      const bDay = tB.schedule[swapSourceDay];
+      if (!bDay || !bDay.slots) return;
+
+      const bTargetSlot = bDay.slots[swapTargetLessonIndex];
+      const bSourceSlot = bDay.slots[swapSourceLessonIndex];
+
+      if (bTargetSlot && bTargetSlot.className && bTargetSlot.className !== 'بێ وانە') {
+        const parsedBTarget = parseClassAndSection(bTargetSlot.className);
+        
+        if (parsedBTarget.grade === targetGrade && parsedBTarget.section === targetSection) {
+          if (bSourceSlot && (bSourceSlot.className === 'بێ وانە' || !bSourceSlot.className || bSourceSlot.className === 'فەراغ')) {
+            suggestions.push({
+              id: `swap_direct_${tB.id}_${Math.random().toString(36).substring(2, 6)}`,
+              type: 'direct',
+              teacherCount: 2,
+              dayName: swapSourceDay,
+              sourceLessonIndex: swapSourceLessonIndex,
+              targetLessonIndex: swapTargetLessonIndex,
+              teacherA: teacherAName,
+              classNameToMove: rawClassToMove,
+              partnerTeacher1: tB.teacherName,
+              partnerSubject1: tB.subject || 'بێ بابەت',
+              partnerClass1: bTargetSlot.className,
+              steps: [
+                {
+                  stepNumber: 1,
+                  teacherName: tB.teacherName,
+                  subject: tB.subject || 'مامۆستا',
+                  fromLesson: swapTargetLessonIndex + 1,
+                  toLesson: swapSourceLessonIndex + 1,
+                  className: `${targetGrade} — ${targetSection}`,
+                  actionKurdish: `م. [${tB.teacherName} - ${tB.subject || ''}] لە وانەی ${swapTargetLessonIndex + 1}دا پۆلا (${targetGrade} — ${targetSection}) بەجێدەهێڵێت و لە وانەی ${swapSourceLessonIndex + 1}دا بەتاڵە.`
+                },
+                {
+                  stepNumber: 2,
+                  teacherName: teacherAName,
+                  subject: teacherASubject,
+                  fromLesson: swapSourceLessonIndex + 1,
+                  toLesson: swapTargetLessonIndex + 1,
+                  className: `${targetGrade} — ${targetSection}`,
+                  actionKurdish: `پاشان [تۆ - ${teacherAName}] وانەکەت لە وانەی ${swapSourceLessonIndex + 1}دا دەگوازیتەوە بۆ وانەی ${swapTargetLessonIndex + 1} د پۆلا (${targetGrade} — ${targetSection}) دا!`
+                }
+              ],
+              detailsKurdish: `⚡ گۆڕینەوەی ڕاستەوخۆی 1 مامۆستا (نەفسی پۆل و هەمان هۆبە):`
+            });
+          }
+        }
+      }
+    });
+
+    // LEVEL 2: 2-Teacher Chain Swaps (3-Way)
+    if (suggestions.length === 0) {
+      allTeachersList.forEach((tB) => {
+        if (tB.teacherName === teacherAName) return;
+        const bDay = tB.schedule[swapSourceDay];
+        if (!bDay || !bDay.slots) return;
+
+        const bTargetSlot = bDay.slots[swapTargetLessonIndex];
+        const bSourceSlot = bDay.slots[swapSourceLessonIndex];
+
+        if (bTargetSlot && bTargetSlot.className && bTargetSlot.className !== 'بێ وانە') {
+          const parsedBTarget = parseClassAndSection(bTargetSlot.className);
+          
+          if (parsedBTarget.grade === targetGrade && parsedBTarget.section === targetSection) {
+            if (bSourceSlot && bSourceSlot.className !== 'بێ وانە' && bSourceSlot.className !== 'فەراغ') {
+              const classBInSource = bSourceSlot.className;
+
+              allTeachersList.forEach((tC) => {
+                if (tC.teacherName === teacherAName || tC.teacherName === tB.teacherName) return;
+                const cDay = tC.schedule[swapSourceDay];
+                if (!cDay || !cDay.slots) return;
+
+                const cSourceSlot = cDay.slots[swapSourceLessonIndex];
+                const cTargetSlot = cDay.slots[swapTargetLessonIndex];
+
+                if (cTargetSlot && cTargetSlot.className === classBInSource && cSourceSlot && (cSourceSlot.className === 'بێ وانە' || !cSourceSlot.className || cSourceSlot.className === 'فەراغ')) {
+                  suggestions.push({
+                    id: `swap_chain_${tB.id}_${tC.id}_${Math.random().toString(36).substring(2, 6)}`,
+                    type: 'chain',
+                    teacherCount: 3,
+                    dayName: swapSourceDay,
+                    sourceLessonIndex: swapSourceLessonIndex,
+                    targetLessonIndex: swapTargetLessonIndex,
+                    teacherA: teacherAName,
+                    classNameToMove: rawClassToMove,
+                    partnerTeacher1: tB.teacherName,
+                    partnerSubject1: tB.subject || '',
+                    partnerClass1: bTargetSlot.className,
+                    partnerTeacher2: tC.teacherName,
+                    partnerSubject2: tC.subject || '',
+                    partnerClass2: classBInSource,
+                    steps: [
+                      {
+                        stepNumber: 1,
+                        teacherName: tC.teacherName,
+                        subject: tC.subject || 'مامۆستا',
+                        fromLesson: swapTargetLessonIndex + 1,
+                        toLesson: swapSourceLessonIndex + 1,
+                        className: classBInSource,
+                        actionKurdish: `1. م. [${tC.teacherName}] دەچێتە پۆلا (${classBInSource}) لە وانەی ${swapSourceLessonIndex + 1}دا چونکە لێرە فەراغە.`
+                      },
+                      {
+                        stepNumber: 2,
+                        teacherName: tB.teacherName,
+                        subject: tB.subject || 'مامۆستا',
+                        fromLesson: swapSourceLessonIndex + 1,
+                        toLesson: swapTargetLessonIndex + 1,
+                        className: `${targetGrade} — ${targetSection}`,
+                        actionKurdish: `2. م. [${tB.teacherName}] پۆلا (${targetGrade} — ${targetSection}) بەجێدەهێڵێت لە وانەی ${swapTargetLessonIndex + 1}دا و دەچێتە شوێنی م. [${tC.teacherName}] لە وانەی ${swapSourceLessonIndex + 1}دا.`
+                      },
+                      {
+                        stepNumber: 3,
+                        teacherName: teacherAName,
+                        subject: teacherASubject,
+                        fromLesson: swapSourceLessonIndex + 1,
+                        toLesson: swapTargetLessonIndex + 1,
+                        className: `${targetGrade} — ${targetSection}`,
+                        actionKurdish: `3. پاشان [تۆ - ${teacherAName}] دەچییە شوێنی م. [${tB.teacherName}] د پۆلا (${targetGrade} — ${targetSection}) دا لە وانەی ${swapTargetLessonIndex + 1}دا!`
+                      }
+                    ],
+                    detailsKurdish: `🔗 گۆڕینەوەی زنجیرەیی 3 مامۆستایی (نەفسی پۆل و هۆبە):`
+                  });
+                }
+              });
+            }
+          }
+        }
+      });
+    }
+
+    // LEVEL 3: 3-Teacher & 4-Teacher Multi-Chain Swaps
+    if (suggestions.length === 0) {
+      allTeachersList.forEach((tB) => {
+        if (tB.teacherName === teacherAName) return;
+        const bDay = tB.schedule[swapSourceDay];
+        if (!bDay || !bDay.slots) return;
+
+        const bTargetSlot = bDay.slots[swapTargetLessonIndex];
+        const bSourceSlot = bDay.slots[swapSourceLessonIndex];
+
+        if (bTargetSlot && bTargetSlot.className && bTargetSlot.className !== 'بێ وانە') {
+          const parsedBTarget = parseClassAndSection(bTargetSlot.className);
+          if (parsedBTarget.grade === targetGrade && parsedBTarget.section === targetSection) {
+            const classBInSource = bSourceSlot?.className;
+            if (classBInSource && classBInSource !== 'بێ وانە') {
+              allTeachersList.forEach((tC) => {
+                if (tC.teacherName === teacherAName || tC.teacherName === tB.teacherName) return;
+                const cDay = tC.schedule[swapSourceDay];
+                if (!cDay || !cDay.slots) return;
+
+                const cSourceSlot = cDay.slots[swapSourceLessonIndex];
+                const classCInSource = cSourceSlot?.className;
+
+                if (classCInSource && classCInSource !== 'بێ وانە') {
+                  allTeachersList.forEach((tD) => {
+                    if (tD.teacherName === teacherAName || tD.teacherName === tB.teacherName || tD.teacherName === tC.teacherName) return;
+                    const dDay = tD.schedule[swapSourceDay];
+                    if (!dDay || !dDay.slots) return;
+
+                    const dSourceSlot = dDay.slots[swapSourceLessonIndex];
+                    const dTargetSlot = dDay.slots[swapTargetLessonIndex];
+
+                    if (dTargetSlot && dTargetSlot.className === classCInSource && dSourceSlot && (dSourceSlot.className === 'بێ وانە' || !dSourceSlot.className || dSourceSlot.className === 'فەراغ')) {
+                      suggestions.push({
+                        id: `swap_multichain_${tB.id}_${tC.id}_${tD.id}_${Math.random().toString(36).substring(2, 6)}`,
+                        type: 'multi_chain',
+                        teacherCount: 4,
+                        dayName: swapSourceDay,
+                        sourceLessonIndex: swapSourceLessonIndex,
+                        targetLessonIndex: swapTargetLessonIndex,
+                        teacherA: teacherAName,
+                        classNameToMove: rawClassToMove,
+                        partnerTeacher1: tB.teacherName,
+                        partnerSubject1: tB.subject || '',
+                        partnerClass1: bTargetSlot.className,
+                        partnerTeacher2: tC.teacherName,
+                        partnerSubject2: tC.subject || '',
+                        partnerClass2: classBInSource,
+                        partnerTeacher3: tD.teacherName,
+                        partnerSubject3: tD.subject || '',
+                        partnerClass3: classCInSource,
+                        steps: [
+                          {
+                            stepNumber: 1,
+                            teacherName: tD.teacherName,
+                            subject: tD.subject || 'مامۆستا',
+                            fromLesson: swapTargetLessonIndex + 1,
+                            toLesson: swapSourceLessonIndex + 1,
+                            className: classCInSource,
+                            actionKurdish: `1. م. [${tD.teacherName}] بچێتە شوێنی م. [${tC.teacherName}] بۆ پۆلا (${classCInSource}) لە وانەی ${swapSourceLessonIndex + 1}دا.`
+                          },
+                          {
+                            stepNumber: 2,
+                            teacherName: tC.teacherName,
+                            subject: tC.subject || 'مامۆستا',
+                            fromLesson: swapSourceLessonIndex + 1,
+                            toLesson: swapTargetLessonIndex + 1,
+                            className: classBInSource,
+                            actionKurdish: `2. م. [${tC.teacherName}] بچێتە شوێنی م. [${tB.teacherName}] بۆ پۆلا (${classBInSource}) لە وانەی ${swapSourceLessonIndex + 1}دا.`
+                          },
+                          {
+                            stepNumber: 3,
+                            teacherName: tB.teacherName,
+                            subject: tB.subject || 'مامۆستا',
+                            fromLesson: swapSourceLessonIndex + 1,
+                            toLesson: swapTargetLessonIndex + 1,
+                            className: `${targetGrade} — ${targetSection}`,
+                            actionKurdish: `3. م. [${tB.teacherName}] پۆلا (${targetGrade} — ${targetSection}) بەجێدەهێڵێت لە وانەی ${swapTargetLessonIndex + 1}دا.`
+                          },
+                          {
+                            stepNumber: 4,
+                            teacherName: teacherAName,
+                            subject: teacherASubject,
+                            fromLesson: swapSourceLessonIndex + 1,
+                            toLesson: swapTargetLessonIndex + 1,
+                            className: `${targetGrade} — ${targetSection}`,
+                            actionKurdish: `4. پاشان [تۆ - ${teacherAName}] دەچییە شوێنی م. [${tB.teacherName}] د پۆلا (${targetGrade} — ${targetSection}) دا لە وانەی ${swapTargetLessonIndex + 1}دا!`
+                          }
+                        ],
+                        detailsKurdish: `🧩 گۆڕینەوەی چوارچێوەیی 4 مامۆستایی (Multi-Teacher Step Swap):`
+                      });
+                    }
+                  });
+                }
+              });
+            }
+          }
+        }
+      });
+    }
+
+    setSwapSuggestions(suggestions);
+    setSwapLoading(false);
+  };
+
+  // Instant offline auto-search when swap modal settings change
+  useEffect(() => {
+    if (showSwapModal) {
+      findSwapSuggestions();
+    }
+  }, [showSwapModal, swapSourceDay, swapSourceLessonIndex, swapTargetLessonIndex, swapSelectedGrade, swapSelectedSection, allTeachersList]);
+
+  const applySwapToDatabase = async (suggestion: SwapSuggestion) => {
+    setSwapExecutingId(suggestion.id);
+    try {
+      const activeDoc = allTeachersList.find(t => t.id === selectedTeacherId || t.teacherName === selectedTeacherId);
+      const partner1Doc = allTeachersList.find(t => t.teacherName === suggestion.partnerTeacher1);
+      const partner2Doc = suggestion.partnerTeacher2 ? allTeachersList.find(t => t.teacherName === suggestion.partnerTeacher2) : null;
+      const partner3Doc = suggestion.partnerTeacher3 ? allTeachersList.find(t => t.teacherName === suggestion.partnerTeacher3) : null;
+
+      if (!activeDoc || !partner1Doc) {
+        alert("مامۆستا دۆزینەوە لە داتابێسدا نەبوو!");
+        return;
+      }
+
+      const dayName = suggestion.dayName;
+      const sIdx = suggestion.sourceLessonIndex;
+      const tIdx = suggestion.targetLessonIndex;
+
+      // Swap Teacher A
+      const newActiveSchedule = JSON.parse(JSON.stringify(activeDoc.schedule));
+      const tempA = newActiveSchedule[dayName].slots[sIdx].className;
+      newActiveSchedule[dayName].slots[sIdx].className = newActiveSchedule[dayName].slots[tIdx].className;
+      newActiveSchedule[dayName].slots[tIdx].className = tempA;
+      await saveTimetableToFirestore(activeDoc.id, { schedule: newActiveSchedule });
+
+      // Swap Teacher B
+      const newPartner1Schedule = JSON.parse(JSON.stringify(partner1Doc.schedule));
+      const tempB = newPartner1Schedule[dayName].slots[sIdx].className;
+      newPartner1Schedule[dayName].slots[sIdx].className = newPartner1Schedule[dayName].slots[tIdx].className;
+      newPartner1Schedule[dayName].slots[tIdx].className = tempB;
+      await saveTimetableToFirestore(partner1Doc.id, { schedule: newPartner1Schedule });
+
+      // Swap Teacher C if present
+      let newPartner2Schedule: any = null;
+      if (partner2Doc) {
+        newPartner2Schedule = JSON.parse(JSON.stringify(partner2Doc.schedule));
+        const tempC = newPartner2Schedule[dayName].slots[sIdx].className;
+        newPartner2Schedule[dayName].slots[sIdx].className = newPartner2Schedule[dayName].slots[tIdx].className;
+        newPartner2Schedule[dayName].slots[tIdx].className = tempC;
+        await saveTimetableToFirestore(partner2Doc.id, { schedule: newPartner2Schedule });
+      }
+
+      // Swap Teacher D if present
+      let newPartner3Schedule: any = null;
+      if (partner3Doc) {
+        newPartner3Schedule = JSON.parse(JSON.stringify(partner3Doc.schedule));
+        const tempD = newPartner3Schedule[dayName].slots[sIdx].className;
+        newPartner3Schedule[dayName].slots[sIdx].className = newPartner3Schedule[dayName].slots[tIdx].className;
+        newPartner3Schedule[dayName].slots[tIdx].className = tempD;
+        await saveTimetableToFirestore(partner3Doc.id, { schedule: newPartner3Schedule });
+      }
+
+      setSchedule(newActiveSchedule);
+      localStorage.setItem('timetable_data', JSON.stringify(newActiveSchedule));
+      saveBackupData('timetable_data', newActiveSchedule);
+
+      setAllTeachersList((prev) => {
+        const updated = prev.map(t => {
+          if (t.id === activeDoc.id) return { ...t, schedule: newActiveSchedule };
+          if (t.id === partner1Doc.id) return { ...t, schedule: newPartner1Schedule };
+          if (partner2Doc && t.id === partner2Doc.id) return { ...t, schedule: newPartner2Schedule };
+          if (partner3Doc && t.id === partner3Doc.id) return { ...t, schedule: newPartner3Schedule };
+          return t;
+        });
+        try {
+          localStorage.setItem(OFFLINE_TEACHERS_STORAGE_KEY, JSON.stringify(updated));
+          saveBackupData(OFFLINE_TEACHERS_STORAGE_KEY, updated);
+        } catch (e) {}
+        return updated;
+      });
+
+      alert(`🎉 گۆڕینەوەی زنجیرەیی دناڤبەرا ${suggestion.teacherCount} مامۆستایان دا ب سەرکەفتیانە جێبەجێکرا و ئۆفلاین خەزن بوو!`);
+      setShowSwapModal(false);
+    } catch (err: any) {
+      alert("خەلەتی: " + err.message);
+    } finally {
+      setSwapExecutingId(null);
+    }
+  };
+
+  // Export All Timetables as JSON Backup File
+  const handleExportAllJson = () => {
+    const dataStr = JSON.stringify(allTeachersList, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `all_school_timetables_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Admin Batch Upload (Code/JSON, Images, PDFs)
+  const handleImportCodeOrFile = async (fileInput?: File) => {
+    setAdminBatchLoading(true);
+    setAdminSuccessMsg(null);
+    try {
+      let parsedTeachers: TeacherTimetableDoc[] = [];
+
+      if (adminImportTab === 'code' && adminCodeInput.trim()) {
+        const raw = JSON.parse(adminCodeInput.trim());
+        const arr = Array.isArray(raw) ? raw : [raw];
+        parsedTeachers = arr.map((item: any) => ({
+          id: item.id || `teacher_${(item.teacherName || 'مامۆستا').replace(/\s+/g, '_')}_${Math.random().toString(36).substring(2, 6)}`,
+          teacherName: item.teacherName || 'مامۆستای نەناسراو',
+          subject: item.subject || 'گشتی',
+          lessonCountPerDay: item.lessonCountPerDay || 6,
+          schedule: item.schedule || INITIAL_SCHEDULE,
+          notes: item.notes || 'کۆدی سەرەکی',
+          updatedAt: new Date().toISOString()
+        }));
+      } else if (fileInput) {
+        if (fileInput.name.endsWith('.json')) {
+          const text = await fileInput.text();
+          const raw = JSON.parse(text);
+          const arr = Array.isArray(raw) ? raw : [raw];
+          parsedTeachers = arr.map((item: any) => ({
+            id: item.id || `teacher_${(item.teacherName || 'مامۆستا').replace(/\s+/g, '_')}_${Math.random().toString(36).substring(2, 6)}`,
+            teacherName: item.teacherName || 'مامۆستای نەناسراو',
+            subject: item.subject || 'گشتی',
+            lessonCountPerDay: item.lessonCountPerDay || 6,
+            schedule: item.schedule || INITIAL_SCHEDULE,
+            notes: item.notes || 'فایلی JSON',
+            updatedAt: new Date().toISOString()
+          }));
+        } else {
+          // Process Image or PDF via Gemini OCR batch extraction
+          const reader = new FileReader();
+          const base64: string = await new Promise((resolve) => {
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(fileInput);
+          });
+          const mime = fileInput.type || "image/jpeg";
+          const extracted = await callClientGeminiExtract(userApiKey, base64, mime, "Extract ALL teacher timetables from this document into array");
+          
+          if (extracted) {
+            const arr = Array.isArray(extracted) ? extracted : [extracted];
+            parsedTeachers = arr.map((item: any) => ({
+              id: `teacher_${(item.teacherName || 'مامۆستا').replace(/\s+/g, '_')}_${Math.random().toString(36).substring(2, 6)}`,
+              teacherName: item.teacherName || 'مامۆستا',
+              subject: item.subject || 'کیمیا',
+              lessonCountPerDay: item.lessonCountPerDay || 6,
+              schedule: item.days ? parseDaysArrayToSchedule(item.days) : INITIAL_SCHEDULE,
+              notes: 'دهێنراوە ب ڕێگەی Gemini AI',
+              updatedAt: new Date().toISOString()
+            }));
+          }
+        }
+      }
+
+      setAdminBatchPreview(parsedTeachers);
+      setAdminSuccessMsg(`🎉 ${parsedTeachers.length} جەتوەلی مامۆستایان ئامادەکران بۆ پێداچوونەوە و بەڵاڤکرن!`);
+    } catch (e: any) {
+      alert("خەلەتی لە داغڵکردندا: " + e.message);
+    } finally {
+      setAdminBatchLoading(false);
+    }
+  };
+
+  const parseDaysArrayToSchedule = (daysArr: any[]): WeekSchedule => {
+    const newSchedule: WeekSchedule = {};
+    DAYS.forEach((dayName) => {
+      const match = daysArr.find((d: any) => d.dayName?.includes(dayName) || dayName.includes(d.dayName));
+      const rawLessons = match?.lessons || [];
+      newSchedule[dayName] = {
+        dayName,
+        shift: match?.shift || 'morning',
+        slots: generateSlotsForDay(match?.shift || 'morning', rawLessons, alarmSettings)
+      };
+    });
+    return newSchedule;
+  };
+
+  const handlePublishAdminBatch = async () => {
+    if (!adminBatchPreview.length) return;
+    setAdminBatchLoading(true);
+    try {
+      await batchSaveTimetablesToFirestore(adminBatchPreview);
+      setAllTeachersList((prev) => {
+        const updatedList = [...prev];
+        adminBatchPreview.forEach((incoming) => {
+          const idx = updatedList.findIndex(t => t.id === incoming.id || t.teacherName === incoming.teacherName);
+          if (idx >= 0) updatedList[idx] = incoming;
+          else updatedList.push(incoming);
+        });
+        try {
+          localStorage.setItem(OFFLINE_TEACHERS_STORAGE_KEY, JSON.stringify(updatedList));
+          saveBackupData(OFFLINE_TEACHERS_STORAGE_KEY, updatedList);
+        } catch (e) {}
+        return updatedList;
+      });
+      setAdminSuccessMsg(`🎉 هەموو ${adminBatchPreview.length} جەتوەلەکە ب سەرکەفتیانە بەڵاڤبوون بۆ هەموو مۆبایلەکان و ئۆفلاین خەزن کران!`);
+      setAdminBatchPreview([]);
+      setAdminCodeInput('');
+    } catch (e: any) {
+      alert("خەلەتی لە بەڵاڤکرندا: " + e.message);
+    } finally {
+      setAdminBatchLoading(false);
+    }
+  };
+
+  const handleAdminStartEditTeacher = (tDoc: TeacherTimetableDoc) => {
+    setAdminEditingTeacher(tDoc);
+    setAdminEditingName(tDoc.teacherName);
+    setAdminEditingSubject(tDoc.subject || 'کیمیا');
+    setAdminEditingSchedule(JSON.parse(JSON.stringify(tDoc.schedule)));
+  };
+
+  const handleAdminUpdateEditingCell = (dayName: string, slotIndex: number, newClass: string) => {
+    if (!adminEditingSchedule) return;
+    setAdminEditingSchedule((prev) => {
+      if (!prev) return prev;
+      const updated = JSON.parse(JSON.stringify(prev));
+      if (updated[dayName] && updated[dayName].slots && updated[dayName].slots[slotIndex]) {
+        updated[dayName].slots[slotIndex].className = newClass;
+      }
+      return updated;
+    });
+  };
+
+  const handleAdminSaveTeacherEdit = async () => {
+    if (!adminEditingTeacher || !adminEditingSchedule) return;
+    setAdminSavingLoading(true);
+    try {
+      const updatedDoc: TeacherTimetableDoc = {
+        ...adminEditingTeacher,
+        teacherName: adminEditingName.trim() || adminEditingTeacher.teacherName,
+        subject: adminEditingSubject.trim() || adminEditingTeacher.subject || 'گشتی',
+        schedule: adminEditingSchedule,
+        updatedAt: new Date().toISOString()
+      };
+
+      await saveTimetableToFirestore(updatedDoc.id, updatedDoc);
+
+      setAllTeachersList((prev) => {
+        const updatedList = prev.map(t => t.id === updatedDoc.id ? updatedDoc : t);
+        try {
+          localStorage.setItem(OFFLINE_TEACHERS_STORAGE_KEY, JSON.stringify(updatedList));
+          saveBackupData(OFFLINE_TEACHERS_STORAGE_KEY, updatedList);
+        } catch (e) {}
+        return updatedList;
+      });
+
+      if (selectedTeacherId === updatedDoc.id || selectedTeacherId === adminEditingTeacher.teacherName) {
+        setTeacherName(updatedDoc.teacherName);
+        setTeacherSubject(updatedDoc.subject);
+        setSchedule(updatedDoc.schedule);
+        localStorage.setItem('teacher_name', updatedDoc.teacherName);
+        localStorage.setItem('teacher_subject', updatedDoc.subject);
+        localStorage.setItem('timetable_data', JSON.stringify(updatedDoc.schedule));
+        saveBackupData('teacher_name', updatedDoc.teacherName);
+        saveBackupData('teacher_subject', updatedDoc.subject);
+        saveBackupData('timetable_data', updatedDoc.schedule);
+      }
+
+      alert(`🎉 دەستکاری و تەعدیلا جەتوەلا [${updatedDoc.teacherName}] ب سەرکەفتیانە پاشکەفت بوو و ئۆفلاینیش خەزن بوو!`);
+      setAdminEditingTeacher(null);
+    } catch (err: any) {
+      alert("خەلەتی لە پاراستندا: " + err.message);
+    } finally {
+      setAdminSavingLoading(false);
+    }
+  };
+
+  const handleAdminDeleteTeacher = async (tDoc: TeacherTimetableDoc) => {
+    if (window.confirm(`ئایا دڵنیای لە سڕینەوەی جەتوەلی مامۆستا [${tDoc.teacherName}] لە داتابێسی قوتابخانێدا؟`)) {
+      try {
+        await deleteTimetableFromFirestore(tDoc.id);
+        setAllTeachersList((prev) => {
+          const updatedList = prev.filter(t => t.id !== tDoc.id);
+          try {
+            localStorage.setItem(OFFLINE_TEACHERS_STORAGE_KEY, JSON.stringify(updatedList));
+            saveBackupData(OFFLINE_TEACHERS_STORAGE_KEY, updatedList);
+          } catch (e) {}
+          return updatedList;
+        });
+        alert(`جەتوەلی [${tDoc.teacherName}] سڕایەوە!`);
+      } catch (e: any) {
+        alert("خەلەتی لە سڕینەوەدا: " + e.message);
+      }
+    }
+  };
+
+  const handleAdminAddNewTeacher = () => {
+    const newId = `teacher_${Math.random().toString(36).substring(2, 8)}`;
+    const newTeacherDoc: TeacherTimetableDoc = {
+      id: newId,
+      teacherName: 'مامۆستای نوی',
+      subject: 'کیمیا',
+      lessonCountPerDay: 6,
+      schedule: JSON.parse(JSON.stringify(INITIAL_SCHEDULE)),
+      notes: 'دروستکراوە لە لایەن ئەدمین',
+      updatedAt: new Date().toISOString()
+    };
+    setAdminEditingTeacher(newTeacherDoc);
+    setAdminEditingName(newTeacherDoc.teacherName);
+    setAdminEditingSubject(newTeacherDoc.subject);
+    setAdminEditingSchedule(JSON.parse(JSON.stringify(INITIAL_SCHEDULE)));
+  };
+
+  // Helper for Header Teacher Live Lookup
+  const getTeacherTodaySummary = (teacherDoc: TeacherTimetableDoc) => {
+    const daySched = teacherDoc.schedule[activeDay];
+    if (!daySched || !daySched.slots) {
+      return { countToday: 0, lastSlotNum: 0, lastEndTime: "00:00", currentClassNow: "بێ وانە", slots: [] };
+    }
+    const slots = daySched.slots;
+    const activeSlots = slots.filter(s => s.className && s.className !== 'بێ وانە');
+    const countToday = activeSlots.length;
+    let lastSlotNum = 0;
+    let lastEndTime = "00:00";
+
+    slots.forEach((s, i) => {
+      if (s.className && s.className !== 'بێ وانە') {
+        lastSlotNum = i + 1;
+        lastEndTime = s.endTime;
+      }
+    });
+
+    const activeSlotNow = currentLiveSlot.slot;
+    const classNow = activeSlotNow ? activeSlotNow.className : "بێ وانە / فەراغ";
+
+    return {
+      countToday,
+      lastSlotNum,
+      lastEndTime,
+      currentClassNow: classNow,
+      slots
+    };
+  };
+
+  const parseClassAndSection = (rawClassStr: string) => {
+    if (!rawClassStr || rawClassStr === 'بێ وانە' || rawClassStr === 'فەراغ') {
+      return { grade: 'بێ وانە', section: 'فەراغ', fullLabel: 'بێ وانە / فەراغ' };
+    }
+    const parts = rawClassStr.split('-').map(p => p.trim());
+    if (parts.length >= 2) {
+      const rawGrade = parts[0];
+      const rawSec = parts[1];
+      const gradeFormatted = rawGrade.startsWith('پۆلا') ? rawGrade : `پۆلا ${rawGrade}`;
+      const sectionFormatted = rawSec.startsWith('هۆبەیا') ? rawSec : `هۆبەیا (${rawSec})`;
+      return {
+        grade: gradeFormatted,
+        section: sectionFormatted,
+        fullLabel: `${gradeFormatted} — ${sectionFormatted}`
+      };
+    }
+    return {
+      grade: rawClassStr.startsWith('پۆلا') ? rawClassStr : `پۆلا ${rawClassStr}`,
+      section: 'هۆبەیا گشتی',
+      fullLabel: rawClassStr
+    };
+  };
+
+  const openTeacherLiveStatusModal = (tDoc: TeacherTimetableDoc) => {
+    setSelectedLookupTeacher(tDoc);
+    setShowTeacherStatusModal(true);
+    setShowHeaderSearchResults(false);
+  };
+
+
 
   useEffect(() => {
     updateLiveModeData(effectiveTime);
@@ -2240,7 +3113,7 @@ const App: React.FC = () => {
 
   return (
     <div
-      className={`min-h-screen bg-slate-50 text-slate-900 pb-24 font-['Vazirmatn'] ${
+      className={`min-h-screen bg-slate-50 text-slate-900 pb-24 font-['Vazirmatn'] overflow-x-hidden w-full max-w-full ${
         viewMode === 'classic' ? 'bg-white' : ''
       }`}
       style={{ '--primary-color': activeTheme.color } as React.CSSProperties}
@@ -3915,6 +4788,25 @@ const App: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Change Selected Teacher Profile */}
+                  <div className="p-4 bg-indigo-50/80 rounded-3xl border border-indigo-200 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-right">
+                        <span className="font-black text-xs text-indigo-950 block">پڕۆفایلی مامۆستای هەڵبژێردراو:</span>
+                        <span className="font-bold text-xs text-indigo-700">{teacherName} ({teacherSubject})</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setShowSettingsModal(false);
+                          setShowTeacherSelectModal(true);
+                        }}
+                        className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-xs shadow-md transition-all active:scale-95"
+                      >
+                        گۆڕینی مامۆستا
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Actions */}
                   <div className="space-y-2">
                     <button
@@ -4043,122 +4935,1386 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Main Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm no-print">
-        <div className="max-w-6xl mx-auto px-4 py-3.5 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl shadow-md" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <LayoutGrid className="text-white w-5 h-5" />
+      {/* Teacher Profile Selection Modal */}
+      {showTeacherSelectModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4">
+          <div className="bg-white rounded-[2.5rem] max-w-lg w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh] border border-slate-100 animate-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="p-6 bg-gradient-to-r from-indigo-900 via-purple-900 to-slate-900 text-white flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-white/10 rounded-2xl backdrop-blur-sm">
+                  <UserCircle className="w-6 h-6 text-yellow-300" />
+                </div>
+                <div>
+                  <h3 className="font-black text-lg">مامۆستا، ناڤێ خۆ هەڵبژێرە</h3>
+                  <p className="text-xs text-indigo-200">دەتوا‌نیت ناڤێ خۆ دیاری بکەی دا جەتوەلا تە بەردەوام ل بەر شاشەی بێت</p>
+                  <div className="flex items-center gap-1.5 mt-1.5">
+                    <span className="text-[10px] font-black bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                      <CheckCircle className="w-3 h-3 text-emerald-300" />
+                      <span>{allTeachersList.length} جەتوەلێن مامۆستایان ئۆفلاین ئامادەن (100% Offline Ready)</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {localStorage.getItem('selected_teacher_id') && (
+                <button
+                  onClick={() => setShowTeacherSelectModal(false)}
+                  className="p-2 hover:bg-white/10 rounded-full text-slate-300"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
             </div>
-            <div>
-              <h1 className="text-lg font-black text-slate-800">جەتوەلا من (خشتەیێ قوتابخانێ)</h1>
-              <div className="flex items-center gap-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">
-                <span>{teacherSubject} - {teacherName} | {alarmSettings.lessonCount || 6} دەرس</span>
-                <span className="text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full font-black">
-                  📅 {getFormattedFullKurdishDate(effectiveTime)}
-                </span>
+
+            {/* Search Input & Grade / Section Filters */}
+            <div className="p-4 border-b bg-slate-50 space-y-3">
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={teacherSearchTerm}
+                  onChange={(e) => setTeacherSearchTerm(e.target.value)}
+                  placeholder="🔍 بگەڕێ بۆ ناڤێ خۆ یان بابەتی خۆ..."
+                  className="w-full text-xs p-3 pr-10 bg-white border border-slate-200 rounded-2xl outline-none focus:border-indigo-600 font-bold"
+                />
+              </div>
+
+              {/* Grade & Section Filters */}
+              <div className="grid grid-cols-2 gap-2 text-xs font-bold">
+                <div>
+                  <label className="text-[11px] text-slate-500 block mb-1">سەف / قۆناغ (Grade):</label>
+                  <select
+                    value={selectedGradeFilter}
+                    onChange={(e) => setSelectedGradeFilter(e.target.value)}
+                    className="w-full p-2 bg-white border border-slate-200 rounded-xl outline-none font-bold text-slate-700"
+                  >
+                    <option value="all">هەموو قۆناغەکان (All Grades)</option>
+                    <option value="10">پۆلا 10</option>
+                    <option value="11">پۆلا 11</option>
+                    <option value="12">پۆلا 12</option>
+                    <option value="1">پۆلا 1</option>
+                    <option value="2">پۆلا 2</option>
+                    <option value="3">پۆلا 3</option>
+                    <option value="4">پۆلا 4</option>
+                    <option value="5">پۆلا 5</option>
+                    <option value="6">پۆلا 6</option>
+                    <option value="7">پۆلا 7</option>
+                    <option value="8">پۆلا 8</option>
+                    <option value="9">پۆلا 9</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-slate-500 block mb-1">هۆبە / بەش (Section):</label>
+                  <select
+                    value={selectedSectionFilter}
+                    onChange={(e) => setSelectedSectionFilter(e.target.value)}
+                    className="w-full p-2 bg-white border border-slate-200 rounded-xl outline-none font-bold text-slate-700"
+                  >
+                    <option value="all">هەموو هۆبەکان (All Sections)</option>
+                    {['أ', 'ب', 'ج', 'د', 'هـ', 'و', 'ز', 'ح', 'ط', 'ی'].map(sec => (
+                      <option key={sec} value={sec}>هۆبەیا ({sec})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* List of Teachers */}
+            <div className="p-4 overflow-y-auto space-y-2 max-h-[60vh] no-scrollbar">
+              {allTeachersList
+                .filter(t => {
+                  const matchesSearch = t.teacherName.toLowerCase().includes(teacherSearchTerm.toLowerCase()) || 
+                                        t.subject.toLowerCase().includes(teacherSearchTerm.toLowerCase());
+                  const schedStr = JSON.stringify(t.schedule);
+                  const matchesGrade = selectedGradeFilter === 'all' || schedStr.includes(selectedGradeFilter);
+                  const matchesSection = selectedSectionFilter === 'all' || schedStr.includes(`- ${selectedSectionFilter}`) || schedStr.includes(selectedSectionFilter);
+                  return matchesSearch && matchesGrade && matchesSection;
+                })
+                .map((tDoc) => {
+                  const isSelected = selectedTeacherId === tDoc.id || selectedTeacherId === tDoc.teacherName;
+                  return (
+                    <div
+                      key={tDoc.id}
+                      onClick={() => selectTeacherProfile(tDoc)}
+                      className={`p-4 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
+                        isSelected
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-md scale-[1.02]'
+                          : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`p-2.5 rounded-xl font-black text-sm ${isSelected ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-700'}`}>
+                          <User className="w-5 h-5" />
+                        </div>
+                        <div className="text-right">
+                          <h4 className="font-black text-sm">{tDoc.teacherName}</h4>
+                          <p className={`text-xs font-medium ${isSelected ? 'text-indigo-100' : 'text-slate-500'}`}>
+                            بابەت: {tDoc.subject || 'گشتی'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {isSelected ? (
+                        <span className="text-xs font-black bg-white/20 px-3 py-1 rounded-full flex items-center gap-1">
+                          <Check className="w-4 h-4" /> هەڵبژێردراوە
+                        </span>
+                      ) : (
+                        <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full hover:bg-indigo-100">
+                          هەڵبژارتن ↗
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Smart Period Swap Modal */}
+      {showSwapModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4">
+          <div className="bg-white rounded-[2.5rem] max-w-2xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[92vh] border border-slate-100">
+            {/* Header */}
+            <div className="p-6 bg-gradient-to-r from-cyan-900 via-indigo-900 to-purple-900 text-white flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-white/10 rounded-2xl backdrop-blur-sm">
+                  <Shuffle className="w-6 h-6 text-cyan-300" />
+                </div>
+                <div>
+                  <h3 className="font-black text-lg">یاریدەدەرێ گۆڕینەوەیا وانان دگەل مامۆستایان</h3>
+                  <p className="text-xs text-cyan-200">گۆڕینەوەی ئۆتۆماتیکیی 1 یان 2 مامۆستایان بەبێ تێکچوونی خشتە</p>
+                </div>
+              </div>
+              <button onClick={() => setShowSwapModal(false)} className="p-2 hover:bg-white/10 rounded-full text-slate-300">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6 overflow-y-auto no-scrollbar">
+              {/* Swap Selection Controls with Grade & Section (پۆل و هۆبە) */}
+              <div className="space-y-4 bg-slate-50 p-5 rounded-3xl border border-slate-200 text-xs">
+                {/* Detected Class & Offline Search Status Bar */}
+                {(() => {
+                  const activeDoc = allTeachersList.find(t => t.id === selectedTeacherId || t.teacherName === selectedTeacherId);
+                  const sourceSlot = activeDoc?.schedule[swapSourceDay]?.slots?.[swapSourceLessonIndex];
+                  const rawClass = sourceSlot?.className || 'بێ وانە';
+                  const parsed = parseClassAndSection(rawClass);
+                  const activeGradeLabel = (swapSelectedGrade && swapSelectedGrade !== 'auto') ? `پۆلا ${swapSelectedGrade}` : parsed.grade;
+                  const activeSectionLabel = (swapSelectedSection && swapSelectedSection !== 'auto') ? `هۆبەیا (${swapSelectedSection})` : parsed.section;
+
+                  return (
+                    <div className="p-3.5 rounded-2xl bg-indigo-900 text-white flex flex-wrap items-center justify-between gap-2 shadow-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="text-yellow-400 font-black text-sm">📌 پۆل و هۆبەیا دەستنیشانکری:</span>
+                        <span className="font-extrabold text-sm bg-white/20 px-3 py-1 rounded-xl text-yellow-200 border border-white/20">
+                          {activeGradeLabel} — {activeSectionLabel}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                        <WifiOff className="w-3 h-3 text-emerald-400" /> سێرچا ئۆفلاین (100% Offline Local Search)
+                      </span>
+                    </div>
+                  );
+                })()}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {/* Day Picker */}
+                  <div>
+                    <label className="font-black text-slate-700 block mb-1.5">ڕۆژ هەڵبژێرە:</label>
+                    <select
+                      value={swapSourceDay}
+                      onChange={(e) => setSwapSourceDay(e.target.value)}
+                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold outline-none focus:border-indigo-600"
+                    >
+                      {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
+
+                  {/* Source Lesson Picker */}
+                  <div>
+                    <label className="font-black text-slate-700 block mb-1.5">وانەی سەرەکی (دەرمەبەست):</label>
+                    <select
+                      value={swapSourceLessonIndex}
+                      onChange={(e) => setSwapSourceLessonIndex(parseInt(e.target.value))}
+                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold outline-none focus:border-indigo-600"
+                    >
+                      {Array.from({ length: alarmSettings.lessonCount || 6 }).map((_, i) => (
+                        <option key={i} value={i}>وانا {i + 1}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Target Lesson Picker */}
+                  <div>
+                    <label className="font-black text-slate-700 block mb-1.5">دەستبکە بە گوڕین بۆ وانەی:</label>
+                    <select
+                      value={swapTargetLessonIndex}
+                      onChange={(e) => setSwapTargetLessonIndex(parseInt(e.target.value))}
+                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold outline-none focus:border-indigo-600"
+                    >
+                      {Array.from({ length: alarmSettings.lessonCount || 6 }).map((_, i) => (
+                        <option key={i} value={i}>وانا {i + 1}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Grade Picker (پۆل) */}
+                  <div>
+                    <label className="font-black text-slate-700 block mb-1.5">چ پۆل (Grade):</label>
+                    <select
+                      value={swapSelectedGrade}
+                      onChange={(e) => setSwapSelectedGrade(e.target.value)}
+                      className="w-full p-2.5 bg-white border border-indigo-200 rounded-xl font-bold outline-none focus:border-indigo-600 text-indigo-900"
+                    >
+                      <option value="auto">✨ ئۆتۆماتیکی (ژ وانەیێ خۆ دیاربکە)</option>
+                      <option value="10">پۆلا 10</option>
+                      <option value="11">پۆلا 11</option>
+                      <option value="12">پۆلا 12</option>
+                      <option value="1">پۆلا 1</option>
+                      <option value="2">پۆلا 2</option>
+                      <option value="3">پۆلا 3</option>
+                      <option value="4">پۆلا 4</option>
+                      <option value="5">پۆلا 5</option>
+                      <option value="6">پۆلا 6</option>
+                      <option value="7">پۆلا 7</option>
+                      <option value="8">پۆلا 8</option>
+                      <option value="9">پۆلا 9</option>
+                    </select>
+                  </div>
+
+                  {/* Section Picker (هۆبە) */}
+                  <div className="sm:col-span-2 lg:col-span-4">
+                    <label className="font-black text-slate-700 block mb-1.5">چ هۆبە (Section):</label>
+                    <select
+                      value={swapSelectedSection}
+                      onChange={(e) => setSwapSelectedSection(e.target.value)}
+                      className="w-full p-2.5 bg-white border border-purple-200 rounded-xl font-bold outline-none focus:border-purple-600 text-purple-900"
+                    >
+                      <option value="auto">✨ ئۆتۆماتیکی (نەفسی هۆبەیا وانەیێ خۆ)</option>
+                      {['أ', 'ب', 'ج', 'د', 'هـ', 'و', 'ز', 'ح', 'ط', 'ی'].map(sec => (
+                        <option key={sec} value={sec}>هۆبەیا ({sec})</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Suggestions Results */}
+              <div className="space-y-4">
+                {swapSuggestions.length === 0 ? (
+                  <div className="p-8 text-center text-slate-400 font-medium text-xs bg-slate-50 rounded-3xl border border-dashed border-slate-200 space-y-2">
+                    <p className="font-black text-slate-600 text-sm">هیچ پێشنیارێکی گۆڕینەوەی گونجاو نەدۆزرایەوە!</p>
+                    <p className="text-slate-400">تکایە دڵنیابەوە کە وانەی سەرەکی بەتاڵ نییە، یان هەمان پۆل و هۆبە تاقیبکەوە.</p>
+                  </div>
+                ) : (
+                  swapSuggestions.map((sug) => (
+                    <div key={sug.id} className="p-6 rounded-[2rem] bg-gradient-to-br from-indigo-50/90 via-purple-50/50 to-white border-2 border-indigo-200/80 space-y-4 shadow-md text-right relative overflow-hidden">
+                      {/* Header Badge */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3 border-indigo-100">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-black px-3.5 py-1 rounded-full text-white shadow-xs ${
+                            sug.type === 'direct'
+                              ? 'bg-emerald-600'
+                              : sug.type === 'chain'
+                              ? 'bg-indigo-600'
+                              : 'bg-purple-700'
+                          }`}>
+                            {sug.type === 'direct'
+                              ? '⚡ گۆڕینەوەی ڕاستەوخۆ (1 مامۆستا)'
+                              : sug.type === 'chain'
+                              ? '🔗 گۆڕینەوەی زنجیرەیی (2 مامۆستا)'
+                              : '🧩 گۆڕینەوەی فرە-زنجیرەیی (3 یان 4 مامۆستا)'}
+                          </span>
+                          <span className="text-xs font-black text-indigo-900 bg-white border border-indigo-200 px-3 py-0.5 rounded-full">
+                            {sug.teacherCount} مامۆستا بەشدارن
+                          </span>
+                        </div>
+                        <span className="text-xs font-extrabold text-indigo-900 bg-indigo-100 px-3 py-1 rounded-full">
+                          پۆل و هۆبە: {sug.classNameToMove}
+                        </span>
+                      </div>
+
+                      {/* Title & Description */}
+                      <p className="text-xs font-black text-indigo-950 leading-relaxed">
+                        {sug.detailsKurdish}
+                      </p>
+
+                      {/* Visual Step-by-Step Flow Cards */}
+                      <div className="space-y-2.5 pt-1">
+                        <h5 className="text-[11px] font-black text-slate-500 uppercase tracking-wider">
+                          📋 نەخشەی هەنگاو بە هەنگاوی گۆڕینەوەکە (Step-by-Step Flow):
+                        </h5>
+                        <div className="space-y-2">
+                          {sug.steps.map((st) => (
+                            <div
+                              key={st.stepNumber}
+                              className="p-3.5 rounded-2xl bg-white border border-indigo-100 shadow-xs flex items-center justify-between gap-3 text-xs font-bold"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-7 h-7 rounded-xl bg-indigo-600 text-white font-black text-xs flex items-center justify-center shadow-xs flex-shrink-0">
+                                  {st.stepNumber}
+                                </div>
+                                <div>
+                                  <div className="font-black text-slate-800 text-xs flex items-center gap-2">
+                                    <span>م. {st.teacherName} ({st.subject})</span>
+                                    <span className="text-[10px] bg-indigo-50 text-indigo-700 font-extrabold px-2 py-0.5 rounded-md">
+                                      وانا {st.fromLesson} ➔ وانا {st.toLesson}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-600 font-medium mt-0.5 leading-snug">
+                                    {st.actionKurdish}
+                                  </p>
+                                </div>
+                              </div>
+                              <span className="text-[10px] font-black text-purple-700 bg-purple-50 border border-purple-200 px-2.5 py-1 rounded-xl flex-shrink-0">
+                                {st.className}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Execute Swap Button */}
+                      <button
+                        onClick={() => applySwapToDatabase(sug)}
+                        disabled={swapExecutingId === sug.id}
+                        className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50 mt-2"
+                      >
+                        {swapExecutingId === sug.id ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5 text-yellow-300" />}
+                        <span>🚀 جێبەجێکرنا هەموو هەنگاوان د داتابێسا Firebase دا (Apply Flow to All)</span>
+                      </button>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
+        </div>
+      )}
 
-          <div className="flex items-center gap-2">
-            {/* Lock Screen Wallpaper Export Button */}
-            <button
-              onClick={() => {
-                setShowWallpaperModal(true);
-                if ("Notification" in window && Notification.permission !== "granted") {
-                  Notification.requestPermission();
-                }
-              }}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-cyan-50 hover:bg-cyan-100 text-cyan-800 text-xs font-black border border-cyan-200 transition-all shadow-sm active:scale-95"
-              title="دروستکرنا ڕەسمێ شاشەیا قوفلا مۆبایلێ (Phone Lockscreen Wallpaper)"
-            >
-              <Smartphone className="w-3.5 h-3.5 text-cyan-600" />
-              <span>شاشەیا قوفلێ</span>
-            </button>
+      {/* Admin Panel & Mass Import/Export Modal */}
+      {showAdminModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4">
+          <div className="bg-white rounded-[2.5rem] max-w-4xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[94vh] border border-slate-100">
+            {/* Header */}
+            <div className="p-6 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-yellow-400 text-slate-950 rounded-2xl shadow-md">
+                  <ShieldCheck className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-black text-lg">بەشی بەڕێوەبەرایەتی و ئەدمین (Admin Control Panel)</h3>
+                  <p className="text-xs text-slate-300">بارکرن و بەڵاڤکرنا بە کۆم بۆ هەموو جەتوەلێن قوتابخانێ</p>
+                </div>
+              </div>
+              <button onClick={() => setShowAdminModal(false)} className="p-2 hover:bg-white/10 rounded-full text-slate-300">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-            {/* Widget Studio Button */}
-            <button
-              onClick={() => {
-                setShowWidgetModal(true);
-                setTimeout(renderWidgetCanvas, 50);
-              }}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-black border border-amber-200 transition-all shadow-sm active:scale-95"
-              title="ویجێتێن شاشەی (Home Screen Widgets)"
-            >
-              <LayoutGrid className="w-3.5 h-3.5 text-amber-600" />
-              <span>ویجێتێن شاشەی (Widgets)</span>
-            </button>
+            {/* Admin PIN Login Lock */}
+            {!isAdminLoggedIn ? (
+              <div className="p-8 space-y-4 max-w-md mx-auto text-center">
+                <div className="w-16 h-16 bg-yellow-100 text-yellow-700 rounded-full flex items-center justify-center mx-auto">
+                  <Lock className="w-8 h-8" />
+                </div>
+                <h4 className="font-black text-slate-800 text-base">کۆدی تێپەڕبوونی ئەدمین لێبدە</h4>
+                <p className="text-xs text-slate-500 font-medium">تەنها ئەدمینی تایبەتی قوتابخانێ دەتوانێت بچێتە ژوورەوە</p>
 
-            {/* Gemini Timetable Extractor Button */}
-            <button
-              onClick={() => setShowAiImportModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-black border border-indigo-200 transition-all shadow-sm active:scale-95"
-            >
-              <Sparkles className="w-4 h-4 text-indigo-600 animate-spin-slow" />
-              <span>دەرهێنان ب Gemini AI</span>
-            </button>
+                <input
+                  type="password"
+                  value={adminPinInput}
+                  onChange={(e) => setAdminPinInput(e.target.value)}
+                  placeholder="کۆدی تێپەڕبوون بنڤێسە..."
+                  className="w-full text-center text-lg p-3 bg-slate-50 border-2 border-slate-200 rounded-2xl font-mono tracking-widest outline-none focus:border-yellow-500"
+                />
 
-            {/* Live Mode Toggle */}
-            <button
-              onClick={() => setViewMode(viewMode === 'live' ? 'modern' : 'live')}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-2xl border text-xs font-bold transition-all ${
-                viewMode === 'live'
-                  ? 'bg-red-500 text-white border-red-500 shadow-md'
-                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <MonitorPlay className={`w-4 h-4 ${viewMode === 'live' ? 'text-white' : 'text-red-500'}`} />
-              <span>مۆدا زیندی</span>
-            </button>
+                {adminPinError && (
+                  <p className="text-xs font-bold text-red-600 bg-red-50 p-2 rounded-xl">{adminPinError}</p>
+                )}
 
-            {/* Modern/Classic view toggle */}
-            <button
-              onClick={toggleViewMode}
-              className="hidden md:flex items-center gap-1.5 px-3.5 py-2 rounded-2xl border border-slate-200 bg-white text-slate-700 text-xs font-bold hover:bg-slate-50 transition-all"
-            >
-              {viewMode === 'modern' ? <Grid className="w-4 h-4" /> : <Smartphone className="w-4 h-4" />}
-              <span>{viewMode === 'modern' ? 'جەتوەل' : 'مۆدێرن'}</span>
-            </button>
+                <button
+                  onClick={() => {
+                    if (adminPinInput === '2026' || adminPinInput === 'admin') {
+                      setIsAdminLoggedIn(true);
+                      setAdminPinError(null);
+                    } else {
+                      setAdminPinError("کۆدی ئەدمین خەلەتە!");
+                    }
+                  }}
+                  className="w-full py-3.5 rounded-2xl bg-yellow-400 hover:bg-yellow-500 text-slate-950 font-black text-xs shadow-md transition-all active:scale-95"
+                >
+                  چوونە ژوورەوە وەک ئەدمین
+                </button>
+              </div>
+            ) : (
+              <div className="p-6 space-y-6 overflow-y-auto no-scrollbar">
+                {/* Actions & Backup Download */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    onClick={handleExportAllJson}
+                    className="p-4 rounded-2xl bg-indigo-50 border-2 border-indigo-200 text-indigo-900 font-black text-xs flex items-center justify-center gap-2 hover:bg-indigo-100 transition-all active:scale-95"
+                  >
+                    <DownloadCloud className="w-5 h-5 text-indigo-600" />
+                    <span>داگرتنا هەموو جەتوەلان وەک فایلی کۆد (JSON Export)</span>
+                  </button>
 
-            {/* LocalStorage Quick Button */}
-            <button
-              onClick={() => {
-                setSettingsActiveTab('storage');
-                setShowSettingsModal(true);
-              }}
-              className="p-2 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition-all shadow-sm"
-              title="بیرگەی ناوخۆیی (LocalStorage & Backup)"
-            >
-              <HardDrive className="w-4 h-4 text-cyan-600" />
-            </button>
+                  <div className="flex items-center justify-between p-4 bg-emerald-50 rounded-2xl border border-emerald-200 text-emerald-900 text-xs font-bold">
+                    <span>ژمارەی جەتوەلە بەردەستەکان د داتابێسدا:</span>
+                    <span className="font-black text-sm bg-emerald-600 text-white px-3 py-1 rounded-xl">
+                      {allTeachersList.length} مامۆستا
+                    </span>
+                  </div>
+                </div>
 
-            {/* Settings button */}
-            <button
-              onClick={() => setShowSettingsModal(true)}
-              className="p-2 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition-all shadow-sm relative"
-              title="ڕێکخستنێن دەم و زەنگێ"
-            >
-              <Settings className="w-5 h-5" />
-              {alarmSettings.examSettings?.enabled && (
-                <span className="absolute -top-1 -right-1 w-3 h-3 bg-purple-600 rounded-full border-2 border-white animate-pulse" />
-              )}
-            </button>
+                {/* Admin Tabs */}
+                <div className="space-y-4 bg-slate-50 p-5 rounded-3xl border border-slate-200">
+                  <div className="flex flex-wrap border-b pb-2 gap-2 text-xs font-black">
+                    <button
+                      onClick={() => setAdminImportTab('edit')}
+                      className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 ${adminImportTab === 'edit' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-200'}`}
+                    >
+                      <Edit3 className="w-4 h-4 text-yellow-300" />
+                      <span>1. تەعدیل و دەستکاریکرن ب 1-کلیک (Interactive Editor)</span>
+                    </button>
+                    <button
+                      onClick={() => setAdminImportTab('code')}
+                      className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 ${adminImportTab === 'code' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-200'}`}
+                    >
+                      <FileJson className="w-4 h-4" />
+                      <span>2. داخلکردنی فایلی کۆد / JSON</span>
+                    </button>
+                    <button
+                      onClick={() => setAdminImportTab('file')}
+                      className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 ${adminImportTab === 'file' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-200'}`}
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span>3. بارکردنی فایلی PDF / وێنە (Gemini OCR)</span>
+                    </button>
+                  </div>
 
-            {/* Save Button */}
-            <button
-              onClick={saveToLocal}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-2xl text-xs font-black transition-all ${
-                isSaved ? 'bg-emerald-600 text-white shadow-md' : 'text-white shadow-md hover:opacity-90'
-              }`}
-              style={{ backgroundColor: isSaved ? '' : 'var(--primary-color)' }}
-            >
-              {isSaved ? <CheckCircle className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-              <span>{isSaved ? 'پاراستی' : 'پاشکەفتن'}</span>
-            </button>
+                  {/* TAB 1: INTERACTIVE 1-CLICK TEACHER EDITOR */}
+                  {adminImportTab === 'edit' && (
+                    <div className="space-y-5">
+                      {!adminEditingTeacher ? (
+                        <div className="space-y-4">
+                          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                            <div className="relative flex-1 w-full">
+                              <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                              <input
+                                type="text"
+                                value={adminTeacherSearch}
+                                onChange={(e) => setAdminTeacherSearch(e.target.value)}
+                                placeholder="🔍 بگەڕێ بۆ ناڤێ مامۆستایەکێ بۆ دەستکاریکرن..."
+                                className="w-full text-xs p-3 pr-10 bg-white border border-slate-200 rounded-2xl outline-none font-bold text-slate-800 focus:border-indigo-600"
+                              />
+                            </div>
+                            <button
+                              onClick={handleAdminAddNewTeacher}
+                              className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md flex items-center justify-center gap-2 transition-all active:scale-95"
+                            >
+                              <Plus className="w-4 h-4" />
+                              <span>زێدەکرنا مامۆستایەکێ نوی</span>
+                            </button>
+                          </div>
+
+                          {/* List of Teachers to Edit with 1-Click */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[55vh] overflow-y-auto pr-1 no-scrollbar">
+                            {allTeachersList
+                              .filter(t => t.teacherName.toLowerCase().includes(adminTeacherSearch.toLowerCase()) || t.subject.toLowerCase().includes(adminTeacherSearch.toLowerCase()))
+                              .map((tDoc) => (
+                                <div
+                                  key={tDoc.id}
+                                  className="p-4 rounded-2xl bg-white border border-slate-200 hover:border-indigo-300 shadow-xs flex items-center justify-between gap-3 transition-all"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="p-3 bg-indigo-50 text-indigo-700 rounded-xl font-black">
+                                      <User className="w-5 h-5" />
+                                    </div>
+                                    <div>
+                                      <h4 className="font-black text-sm text-slate-800">{tDoc.teacherName}</h4>
+                                      <span className="text-xs text-indigo-600 font-bold bg-indigo-50 px-2 py-0.5 rounded-full">
+                                        بابەت: {tDoc.subject || 'کیمیا'}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => handleAdminStartEditTeacher(tDoc)}
+                                      className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs shadow-sm flex items-center gap-1.5 active:scale-95 transition-all"
+                                    >
+                                      <Edit3 className="w-3.5 h-3.5 text-yellow-300" />
+                                      <span>تەعدیلکرن</span>
+                                    </button>
+                                    <button
+                                      onClick={() => handleAdminDeleteTeacher(tDoc)}
+                                      className="p-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 transition-all"
+                                      title="سڕینەوە"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      ) : (
+                        /* INLINE INTERACTIVE MATRIX EDITOR */
+                        <div className="p-5 rounded-3xl bg-white border-2 border-indigo-200 shadow-lg space-y-5 animate-in fade-in duration-200">
+                          <div className="flex items-center justify-between border-b pb-4 border-slate-200">
+                            <div className="flex items-center gap-2">
+                              <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-md">
+                                <Edit3 className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <h3 className="font-black text-base text-slate-800">تەعدیل و دەستکاریکرنی جەتوەلی:</h3>
+                                <p className="text-xs text-slate-500 font-medium">پاش دەستکاریکرن، ب کلیکەکێ بۆ هەمووان خەزن دبيت</p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => setAdminEditingTeacher(null)}
+                              className="p-2 hover:bg-slate-100 rounded-full text-slate-400"
+                            >
+                              <X className="w-5 h-5" />
+                            </button>
+                          </div>
+
+                          {/* Editable Teacher Info */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-xs font-black text-slate-700 block mb-1">ناڤێ مامۆستای:</label>
+                              <input
+                                type="text"
+                                value={adminEditingName}
+                                onChange={(e) => setAdminEditingName(e.target.value)}
+                                className="w-full text-xs p-3 bg-slate-50 border border-slate-300 rounded-2xl outline-none font-bold text-slate-900 focus:border-indigo-600"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs font-black text-slate-700 block mb-1">بابەت / دەرسا مامۆستای:</label>
+                              <input
+                                type="text"
+                                value={adminEditingSubject}
+                                onChange={(e) => setAdminEditingSubject(e.target.value)}
+                                className="w-full text-xs p-3 bg-slate-50 border border-slate-300 rounded-2xl outline-none font-bold text-slate-900 focus:border-indigo-600"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Matrix Table Editor */}
+                          <div className="border border-slate-200 rounded-2xl overflow-x-auto shadow-xs">
+                            <table className="w-full text-xs text-center border-collapse">
+                              <thead>
+                                <tr className="bg-indigo-900 text-white font-black border-b">
+                                  <th className="p-3 border-l min-w-[100px]">ڕۆژ</th>
+                                  {Array.from({ length: 6 }).map((_, i) => (
+                                    <th key={i} className="p-3 border-l min-w-[110px]">
+                                      وانا {i + 1}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {DAYS.map((dayName) => {
+                                  const slots = adminEditingSchedule?.[dayName]?.slots || [];
+                                  return (
+                                    <tr key={dayName} className="border-b hover:bg-slate-50/80">
+                                      <td className="p-3 font-black text-slate-800 bg-slate-100 border-l whitespace-nowrap">
+                                        {dayName}
+                                      </td>
+                                      {Array.from({ length: 6 }).map((_, slotIdx) => {
+                                        const currentVal = slots[slotIdx]?.className || 'بێ وانە';
+                                        const standardOptions = [
+                                          "بێ وانە",
+                                          "10 - أ", "10 - ب", "10 - ج", "10 - د", "10 - هـ", "10 - و",
+                                          "11 - أ", "11 - ب", "11 - ج", "11 - د", "11 - هـ", "11 - و",
+                                          "12 - أ", "12 - ب", "12 - ج", "12 - د", "12 - هـ", "12 - و"
+                                        ];
+
+                                        return (
+                                          <td key={slotIdx} className="p-1.5 border-l">
+                                            <div className="space-y-1">
+                                              <select
+                                                value={standardOptions.includes(currentVal) ? currentVal : 'custom'}
+                                                onChange={(e) => {
+                                                  if (e.target.value !== 'custom') {
+                                                    handleAdminUpdateEditingCell(dayName, slotIdx, e.target.value);
+                                                  }
+                                                }}
+                                                className={`w-full text-center py-1.5 px-1 rounded-xl font-extrabold text-xs outline-none border cursor-pointer ${
+                                                  currentVal === 'بێ وانە'
+                                                    ? 'bg-slate-100 text-slate-400 border-slate-200'
+                                                    : 'bg-indigo-50 text-indigo-900 border-indigo-300 focus:ring-2 focus:ring-indigo-500'
+                                                }`}
+                                              >
+                                                {standardOptions.map(opt => (
+                                                  <option key={opt} value={opt}>{opt}</option>
+                                                ))}
+                                                <option value="custom">✍️ بنڤێسە (Custom)...</option>
+                                              </select>
+
+                                              {(!standardOptions.includes(currentVal) || currentVal === 'custom') && (
+                                                <input
+                                                  type="text"
+                                                  value={currentVal === 'custom' ? '' : currentVal}
+                                                  onChange={(e) => handleAdminUpdateEditingCell(dayName, slotIdx, e.target.value)}
+                                                  placeholder="تێکست..."
+                                                  className="w-full text-center p-1 bg-white border border-indigo-400 rounded-lg text-xs font-bold"
+                                                />
+                                              )}
+                                            </div>
+                                          </td>
+                                        );
+                                      })}
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* Save & Cancel Actions */}
+                          <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+                            <button
+                              onClick={handleAdminSaveTeacherEdit}
+                              disabled={adminSavingLoading}
+                              className="w-full sm:flex-1 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50"
+                            >
+                              {adminSavingLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                              <span>💾 پاشکەفتن و بەڵاڤکرن بۆ هەموویان د Firebase دا (Save & Publish)</span>
+                            </button>
+                            <button
+                              onClick={() => setAdminEditingTeacher(null)}
+                              className="w-full sm:w-auto px-6 py-4 rounded-2xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs transition-all"
+                            >
+                              پاشگەزبوونەوە (Cancel)
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {adminImportTab === 'code' && (
+                    <div className="space-y-3">
+                      <textarea
+                        value={adminCodeInput}
+                        onChange={(e) => setAdminCodeInput(e.target.value)}
+                        placeholder="کۆدی JSON بۆ لێرە بپێسەت بکە..."
+                        className="w-full text-xs font-mono p-3 bg-white border border-slate-300 rounded-2xl h-32 outline-none"
+                      />
+                      <button
+                        onClick={() => handleImportCodeOrFile()}
+                        disabled={adminBatchLoading || !adminCodeInput.trim()}
+                        className="w-full py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs shadow-md"
+                      >
+                        پێداچوونەوە و شیکارکرنی کۆدەکە
+                      </button>
+                    </div>
+                  )}
+
+                  {adminImportTab === 'file' && (
+                    <label className="border-2 border-dashed border-slate-300 bg-white hover:bg-indigo-50/50 p-8 rounded-2xl flex flex-col items-center justify-center cursor-pointer text-center">
+                      <Upload className="w-8 h-8 text-indigo-600 mb-2" />
+                      <span className="font-bold text-xs text-slate-700">فایلی PDF یان وێنەی جەتوەلەکان هەڵبژێرە</span>
+                      <span className="text-[10px] text-slate-400 mt-1">PDF, PNG, JPG</span>
+                      <input
+                        type="file"
+                        accept="image/*,.pdf,.json"
+                        className="hidden"
+                        onChange={(e) => e.target.files && handleImportCodeOrFile(e.target.files[0])}
+                      />
+                    </label>
+                  )}
+                </div>
+
+                {adminSuccessMsg && (
+                  <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-black flex items-center justify-between">
+                    <span>{adminSuccessMsg}</span>
+                  </div>
+                )}
+
+                {/* Batch Review Table */}
+                {adminBatchPreview.length > 0 && (
+                  <div className="space-y-3 border-t pt-4">
+                    <h4 className="font-black text-slate-800 text-sm">پێداچوونەوەی جەتوەلەکانی ئامادەکراو:</h4>
+                    <div className="border rounded-2xl overflow-x-auto max-h-60">
+                      <table className="w-full text-xs text-center border-collapse">
+                        <thead>
+                          <tr className="bg-slate-100 font-black border-b">
+                            <th className="p-2 border-l">ناڤی مامۆستا</th>
+                            <th className="p-2 border-l">بابەت</th>
+                            <th className="p-2 border-l">دۆخ</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {adminBatchPreview.map((tb, idx) => (
+                            <tr key={idx} className="border-b">
+                              <td className="p-2 font-bold border-l">{tb.teacherName}</td>
+                              <td className="p-2 font-bold border-l">{tb.subject}</td>
+                              <td className="p-2 text-emerald-600 font-bold border-l">ئامادەیە بۆ بەڵاڤکرن ✓</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <button
+                      onClick={handlePublishAdminBatch}
+                      disabled={adminBatchLoading}
+                      className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all"
+                    >
+                      {adminBatchLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
+                      <span>🚀 بەڵاڤکرنا هەموو جەتوەلەکان بۆ داتابێسا Firebase</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
+      )}
+
+      {/* Teacher Live Status & Location Modal */}
+      {showTeacherStatusModal && selectedLookupTeacher && (() => {
+        const summary = getTeacherTodaySummary(selectedLookupTeacher);
+        const activeSlotNow = currentLiveSlot.slot;
+        const daySched = selectedLookupTeacher.schedule[activeDay];
+        const todaySlots = daySched?.slots || [];
+        
+        // Find current live slot
+        const currentSlotIndex = activeSlotNow ? todaySlots.findIndex(s => s.startTime === activeSlotNow.startTime) : -1;
+        const currentSlotForTeacher = currentSlotIndex >= 0 ? todaySlots[currentSlotIndex] : null;
+        const rawClassNow = currentSlotForTeacher ? currentSlotForTeacher.className : 'بێ وانە';
+        const parsedNow = parseClassAndSection(rawClassNow);
+        const isTeachingNow = currentLiveSlot.status === 'active' && rawClassNow !== 'بێ وانە' && rawClassNow !== 'فەراغ';
+
+        return (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/75 backdrop-blur-md p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-[2.5rem] max-w-lg w-full shadow-2xl overflow-hidden flex flex-col max-h-[92vh] border border-slate-100">
+              {/* Modal Top Banner Header */}
+              <div className="p-6 bg-gradient-to-r from-slate-900 via-indigo-950 to-purple-950 text-white flex justify-between items-start relative overflow-hidden">
+                <div className="absolute -right-10 -bottom-10 opacity-10">
+                  <GraduationCap className="w-48 h-48" />
+                </div>
+                <div className="relative z-10 flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-2xl bg-indigo-600/50 border-2 border-indigo-400/50 backdrop-blur-md flex items-center justify-center font-black text-2xl text-yellow-300 shadow-lg">
+                    {selectedLookupTeacher.teacherName.slice(0, 2)}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-black text-xl text-white">{selectedLookupTeacher.teacherName}</h3>
+                      <span className="text-[10px] font-extrabold bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 px-2.5 py-0.5 rounded-full">
+                        {selectedLookupTeacher.subject || 'گشتی'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 font-medium mt-1">
+                      📅 ڕۆژا {activeDay} | گشتی {summary.countToday} وانە دگریت
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowTeacherStatusModal(false)}
+                  className="relative z-10 p-2 hover:bg-white/10 rounded-full text-slate-300 transition-all"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-6 space-y-5 overflow-y-auto no-scrollbar">
+                {/* Current Live Teaching Location Card (جهێ نوکە وانە لێ) */}
+                <div className={`p-5 rounded-3xl border-2 transition-all space-y-3.5 shadow-sm ${
+                  isTeachingNow 
+                    ? 'bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-teal-500/10 border-emerald-500/40 text-emerald-950'
+                    : 'bg-slate-50 border-slate-200 text-slate-800'
+                }`}>
+                  <div className="flex items-center justify-between border-b pb-3 border-slate-200/60">
+                    <span className="text-xs font-black uppercase tracking-widest flex items-center gap-2">
+                      {isTeachingNow ? (
+                        <span className="flex items-center gap-1.5 text-emerald-600 bg-emerald-100 px-3 py-1 rounded-full text-[11px]">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
+                          🔴 نوکە د پۆلێ دایە (Currently Teaching)
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1.5 text-slate-600 bg-slate-200/80 px-3 py-1 rounded-full text-[11px]">
+                          ⚪ بەتاڵە / فەراغ یان دەرڤەی دەوامی
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-xs font-extrabold text-slate-500">جهێ نوکە وانە لێ</span>
+                  </div>
+
+                  {/* Big Class, Grade & Section Grid */}
+                  <div className="grid grid-cols-2 gap-3 text-center">
+                    {/* Grade / Class Box */}
+                    <div className="p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-1">
+                      <span className="text-[11px] font-bold text-slate-400 block">چ پۆل (Grade)</span>
+                      <span className="text-lg font-black text-indigo-900 block">
+                        {parsedNow.grade}
+                      </span>
+                    </div>
+
+                    {/* Section / Huba Box */}
+                    <div className="p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-1">
+                      <span className="text-[11px] font-bold text-slate-400 block">چ هۆبە (Section)</span>
+                      <span className="text-lg font-black text-purple-900 block">
+                        {parsedNow.section}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Subject Info */}
+                  <div className="flex items-center justify-between p-3 rounded-2xl bg-white/80 border border-slate-200/60 text-xs font-bold">
+                    <span className="text-slate-500">چ بابەت دەبێت:</span>
+                    <span className="text-indigo-700 font-black">{selectedLookupTeacher.subject || 'کیمیا'}</span>
+                  </div>
+                </div>
+
+                {/* Full Today Breakdown */}
+                <div className="space-y-3">
+                  <h4 className="font-black text-sm text-slate-800 flex items-center justify-between">
+                    <span>خشتەیێ وانێن ئەڤڕۆ ({activeDay}):</span>
+                    <span className="text-xs font-extrabold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full">
+                      {summary.countToday} وانە
+                    </span>
+                  </h4>
+
+                  <div className="space-y-2">
+                    {todaySlots.map((slot, sIdx) => {
+                      const parsed = parseClassAndSection(slot.className);
+                      const isCurrent = activeSlotNow && activeSlotNow.startTime === slot.startTime;
+                      return (
+                        <div
+                          key={slot.id || sIdx}
+                          className={`p-3.5 rounded-2xl border transition-all flex items-center justify-between ${
+                            isCurrent
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-md scale-[1.01]'
+                              : slot.className === 'بێ وانە'
+                              ? 'bg-slate-50 border-slate-200 text-slate-400'
+                              : 'bg-white border-slate-200 text-slate-800 hover:border-indigo-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`w-8 h-8 rounded-xl font-black text-xs flex items-center justify-center ${
+                              isCurrent ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {sIdx + 1}
+                            </div>
+                            <div>
+                              <div className="font-black text-sm flex items-center gap-2">
+                                <span>{parsed.fullLabel}</span>
+                                {isCurrent && (
+                                  <span className="text-[9px] bg-yellow-400 text-slate-950 px-2 py-0.5 rounded-full font-black">
+                                    نوکە ⚡
+                                  </span>
+                                )}
+                              </div>
+                              <p className={`text-[11px] font-medium ${isCurrent ? 'text-indigo-100' : 'text-slate-400'}`}>
+                                {slot.startTime} — {slot.endTime}
+                              </p>
+                            </div>
+                          </div>
+
+                          <span className={`text-xs font-bold px-2.5 py-1 rounded-xl ${
+                            slot.className === 'بێ وانە'
+                              ? 'bg-slate-200/50 text-slate-400'
+                              : isCurrent
+                              ? 'bg-white/20 text-white'
+                              : 'bg-indigo-50 text-indigo-700'
+                          }`}>
+                            {slot.className === 'بێ وانە' ? 'فەراغ' : selectedLookupTeacher.subject || 'کیمیا'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Action Button: Set as main view timetable */}
+                <button
+                  onClick={() => {
+                    selectTeacherProfile(selectedLookupTeacher);
+                    setShowTeacherStatusModal(false);
+                  }}
+                  className="w-full py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all"
+                >
+                  <CheckCircle2 className="w-5 h-5 text-yellow-300" />
+                  <span>نیشاندانا ڤی جەتوەلی وەک جەتوەلا سەرەکی د بەرنامەی دا</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Main Header - Device Adapted (Mobile, Tablet, Desktop) */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm no-print w-full">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex flex-col gap-2">
+          
+          {/* Top Primary Bar */}
+          <div className="flex items-center justify-between gap-2 w-full">
+            
+            {/* Title & Badge */}
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <div className="p-2 sm:p-2.5 rounded-2xl shadow-md shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
+                <LayoutGrid className="text-white w-4 h-4 sm:w-5 sm:h-5" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-sm sm:text-base md:text-lg font-black text-slate-800 truncate">
+                  جەتوەلا من (خشتەیێ قوتابخانێ)
+                </h1>
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-bold truncate mt-0.5">
+                  <span className="truncate">{teacherSubject} - {teacherName}</span>
+                  <span className="hidden sm:inline-block text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full font-black text-[9px] shrink-0">
+                    📅 {getFormattedFullKurdishDate(effectiveTime)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Desktop Action Group (> 1024px / lg) */}
+            <div className="hidden lg:flex items-center gap-2 shrink-0">
+              {/* Search input desktop */}
+              <div className="relative w-48 xl:w-60">
+                <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={headerSearchQuery}
+                  onChange={(e) => {
+                    setHeaderSearchQuery(e.target.value);
+                    setShowHeaderSearchResults(Boolean(e.target.value.trim()));
+                  }}
+                  placeholder="🔍 بگەڕێ بۆ مامۆستایان..."
+                  className="w-full text-xs py-2 pr-9 pl-3 bg-slate-100 border border-slate-200 rounded-2xl outline-none focus:border-indigo-500 font-bold transition-all"
+                />
+
+                {showHeaderSearchResults && headerSearchQuery.trim() && (
+                  <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 p-3 z-50 space-y-2 max-h-96 overflow-y-auto">
+                    <div className="flex justify-between items-center text-[11px] font-black text-slate-500 border-b pb-1.5">
+                      <span>ئەنجامێن لێگەڕیانێ ({headerSearchQuery})</span>
+                      <button onClick={() => setShowHeaderSearchResults(false)} className="text-slate-400 hover:text-slate-700">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {allTeachersList
+                      .filter(t => 
+                        t.teacherName.toLowerCase().includes(headerSearchQuery.toLowerCase()) || 
+                        t.subject.toLowerCase().includes(headerSearchQuery.toLowerCase()) ||
+                        JSON.stringify(t.schedule).toLowerCase().includes(headerSearchQuery.toLowerCase())
+                      )
+                      .slice(0, 8)
+                      .map((tDoc) => {
+                        const summary = getTeacherTodaySummary(tDoc);
+                        return (
+                          <div
+                            key={tDoc.id}
+                            onClick={() => {
+                              openTeacherLiveStatusModal(tDoc);
+                            }}
+                            className="p-3 rounded-2xl bg-slate-50 hover:bg-indigo-50/80 border border-slate-200 hover:border-indigo-300 transition-all cursor-pointer space-y-1.5 text-right shadow-xs group"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-black text-xs text-indigo-950 group-hover:text-indigo-700">
+                                {tDoc.teacherName} ({tDoc.subject})
+                              </span>
+                              <span className="text-[10px] bg-indigo-100 text-indigo-800 font-black px-2 py-0.5 rounded-full">
+                                {summary.countToday} وانە ئەڤڕۆ
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-600 font-bold flex items-center justify-between pt-1">
+                              <span className="text-emerald-700">📍 جهێ نوکە: {summary.currentClassNow}</span>
+                              <span className="text-slate-500">⏱️ دەستنیشانکرن ↗</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons Desktop */}
+              <button
+                onClick={() => setShowTeacherSelectModal(true)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-indigo-50 hover:bg-indigo-100 text-indigo-900 text-xs font-black border border-indigo-200 transition-all shadow-sm active:scale-95"
+                title="گۆڕینی مامۆستایێ هەڵبژێردراو"
+              >
+                <Users className="w-3.5 h-3.5 text-indigo-600" />
+                <span>مامۆستا ({allTeachersList.length})</span>
+              </button>
+
+              <button
+                onClick={() => setShowSwapModal(true)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-purple-50 hover:bg-purple-100 text-purple-900 text-xs font-black border border-purple-200 transition-all shadow-sm active:scale-95"
+                title="گۆڕینەوەی وانەکان دگەل مامۆستایان"
+              >
+                <Shuffle className="w-3.5 h-3.5 text-purple-600" />
+                <span>گۆڕینەوەی وانە</span>
+              </button>
+
+              <button
+                onClick={() => setShowAdminModal(true)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-yellow-50 hover:bg-yellow-100 text-yellow-900 text-xs font-black border border-yellow-300 transition-all shadow-sm active:scale-95"
+                title="بەشی ئەدمین و بەڕێوەبەرایەتی"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-yellow-600" />
+                <span>ئەدمین</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowWallpaperModal(true);
+                  if ("Notification" in window && Notification.permission !== "granted") {
+                    Notification.requestPermission();
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-cyan-50 hover:bg-cyan-100 text-cyan-800 text-xs font-black border border-cyan-200 transition-all shadow-sm active:scale-95"
+                title="دروستکرنا ڕەسمێ شاشەیا قوفلا مۆبایلێ"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-cyan-600" />
+                <span>شاشەیا قوفلێ</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowWidgetModal(true);
+                  setTimeout(renderWidgetCanvas, 50);
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-black border border-amber-200 transition-all shadow-sm active:scale-95"
+                title="ویجێتێن شاشەی"
+              >
+                <LayoutGrid className="w-3.5 h-3.5 text-amber-600" />
+                <span>ویجێت</span>
+              </button>
+
+              <button
+                onClick={() => setShowAiImportModal(true)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-black border border-indigo-200 transition-all shadow-sm active:scale-95"
+              >
+                <Sparkles className="w-4 h-4 text-indigo-600" />
+                <span>Gemini AI</span>
+              </button>
+
+              <button
+                onClick={() => setViewMode(viewMode === 'classic' ? 'modern' : 'classic')}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-2xl border text-xs font-black transition-all shadow-sm active:scale-95 ${
+                  viewMode === 'classic'
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                    : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border-indigo-200'
+                }`}
+                title="گۆڕینی شێوازی خشتەی گشتی"
+              >
+                <Grid className="w-3.5 h-3.5 text-yellow-300" />
+                <span>{viewMode === 'classic' ? 'شێوازێ مۆدێرن' : 'شێوازێ خشتێ (Table)'}</span>
+              </button>
+
+              <button
+                onClick={() => setViewMode(viewMode === 'live' ? 'modern' : 'live')}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-2xl border text-xs font-bold transition-all ${
+                  viewMode === 'live'
+                    ? 'bg-red-500 text-white border-red-500 shadow-md'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <MonitorPlay className={`w-4 h-4 ${viewMode === 'live' ? 'text-white' : 'text-red-500'}`} />
+                <span>مۆدا زیندی</span>
+              </button>
+
+              <button
+                onClick={() => setShowSettingsModal(true)}
+                className="p-2 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition-all shadow-sm relative"
+                title="ڕێکخستن"
+              >
+                <Settings className="w-5 h-5" />
+                {alarmSettings.examSettings?.enabled && (
+                  <span className="absolute -top-1 -right-1 w-3 h-3 bg-purple-600 rounded-full border-2 border-white animate-pulse" />
+                )}
+              </button>
+
+              <button
+                onClick={saveToLocal}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-xs font-black transition-all ${
+                  isSaved ? 'bg-emerald-600 text-white shadow-md' : 'text-white shadow-md hover:opacity-90'
+                }`}
+                style={{ backgroundColor: isSaved ? '' : 'var(--primary-color)' }}
+              >
+                {isSaved ? <CheckCircle className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+                <span>{isSaved ? 'پاراستی' : 'پاشکەفتن'}</span>
+              </button>
+            </div>
+
+            {/* Mobile & Tablet Top Control Controls (< 1024px / lg) */}
+            <div className="flex lg:hidden items-center gap-1.5 shrink-0">
+              {/* Quick View Mode Switcher for Mobile */}
+              <button
+                onClick={() => setViewMode(viewMode === 'classic' ? 'modern' : 'classic')}
+                className={`px-2.5 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1 transition-all ${
+                  viewMode === 'classic' ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-indigo-50 text-indigo-900 border-indigo-200'
+                }`}
+                title="گۆڕینی شێوازی خشتە"
+              >
+                <Grid className="w-3.5 h-3.5 text-yellow-300" />
+                <span>{viewMode === 'classic' ? 'مۆدێرن' : 'خشتە'}</span>
+              </button>
+
+              {/* Mobile Search Toggle */}
+              <button
+                onClick={() => setMobileSearchOpen(!mobileSearchOpen)}
+                className={`p-2 rounded-xl border text-xs font-black transition-all ${
+                  mobileSearchOpen ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-100 text-slate-700 border-slate-200'
+                }`}
+                title="گەڕیان"
+              >
+                <Search className="w-4 h-4" />
+              </button>
+
+              {/* Quick Teacher Switch Button */}
+              <button
+                onClick={() => setShowTeacherSelectModal(true)}
+                className="px-2.5 py-1.5 rounded-xl bg-indigo-50 text-indigo-900 text-xs font-black border border-indigo-200 flex items-center gap-1"
+              >
+                <Users className="w-3.5 h-3.5 text-indigo-600" />
+                <span className="hidden sm:inline">مامۆستا</span>
+              </button>
+
+              {/* Save Quick Button */}
+              <button
+                onClick={saveToLocal}
+                className="p-2 rounded-xl text-white font-black text-xs shadow-sm transition-all"
+                style={{ backgroundColor: isSaved ? '#059669' : 'var(--primary-color)' }}
+                title="پاشکەفتن"
+              >
+                {isSaved ? <CheckCircle className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+              </button>
+
+              {/* Mobile Menu Drawer Toggle Button */}
+              <button
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="p-2 rounded-xl bg-indigo-600 text-white font-black shadow-md active:scale-95 transition-all flex items-center gap-1"
+                aria-label="مێنیو"
+              >
+                {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              </button>
+            </div>
+          </div>
+
+          {/* Mobile Search Input Row */}
+          {mobileSearchOpen && (
+            <div className="relative w-full lg:hidden pt-1 animate-in slide-in-from-top-1 duration-150">
+              <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={headerSearchQuery}
+                onChange={(e) => {
+                  setHeaderSearchQuery(e.target.value);
+                  setShowHeaderSearchResults(Boolean(e.target.value.trim()));
+                }}
+                placeholder="🔍 بگەڕێ بۆ ناڤێ مامۆستایان یان پۆلان..."
+                className="w-full text-xs py-2 pr-9 pl-3 bg-slate-100 border border-slate-200 rounded-xl outline-none font-bold"
+              />
+
+              {showHeaderSearchResults && headerSearchQuery.trim() && (
+                <div className="absolute right-0 top-full mt-2 w-full bg-white rounded-2xl shadow-2xl border border-slate-200 p-3 z-50 space-y-2 max-h-80 overflow-y-auto">
+                  <div className="flex justify-between items-center text-[11px] font-black text-slate-500 border-b pb-1.5">
+                    <span>ئەنجامێن لێگەڕیانێ ({headerSearchQuery})</span>
+                    <button onClick={() => setShowHeaderSearchResults(false)} className="text-slate-400 hover:text-slate-700">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {allTeachersList
+                    .filter(t => 
+                      t.teacherName.toLowerCase().includes(headerSearchQuery.toLowerCase()) || 
+                      t.subject.toLowerCase().includes(headerSearchQuery.toLowerCase()) ||
+                      JSON.stringify(t.schedule).toLowerCase().includes(headerSearchQuery.toLowerCase())
+                    )
+                    .slice(0, 8)
+                    .map((tDoc) => {
+                      const summary = getTeacherTodaySummary(tDoc);
+                      return (
+                        <div
+                          key={tDoc.id}
+                          onClick={() => {
+                            openTeacherLiveStatusModal(tDoc);
+                            setMobileSearchOpen(false);
+                          }}
+                          className="p-3 rounded-2xl bg-slate-50 hover:bg-indigo-50/80 border border-slate-200 hover:border-indigo-300 transition-all cursor-pointer space-y-1.5 text-right shadow-xs group"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-black text-xs text-indigo-950 group-hover:text-indigo-700">
+                              {tDoc.teacherName} ({tDoc.subject})
+                            </span>
+                            <span className="text-[10px] bg-indigo-100 text-indigo-800 font-black px-2 py-0.5 rounded-full">
+                              {summary.countToday} وانە ئەڤڕۆ
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-600 font-bold flex items-center justify-between pt-1">
+                            <span className="text-emerald-700">📍 جهێ نوکە: {summary.currentClassNow}</span>
+                            <span className="text-slate-500">⏱️ دەستنیشانکرن ↗</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Mobile Collapsible Drawer Grid Menu (< 1024px / lg) */}
+          {isMobileMenuOpen && (
+            <div className="lg:hidden pt-3 border-t border-slate-200 space-y-2.5 animate-in slide-in-from-top-2 duration-200">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-black">
+                <button
+                  onClick={() => { setViewMode('classic'); setIsMobileMenuOpen(false); }}
+                  className={`p-3 rounded-2xl border flex items-center gap-2 active:scale-95 transition-all col-span-2 ${
+                    viewMode === 'classic' ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-indigo-50 border-indigo-200 text-indigo-950'
+                  }`}
+                >
+                  <Grid className="w-4 h-4 shrink-0 text-yellow-300" />
+                  <span className="truncate">📊 شێوازێ خشتێ گشتی (Classic Matrix Table)</span>
+                </button>
+
+                <button
+                  onClick={() => { setViewMode('modern'); setIsMobileMenuOpen(false); }}
+                  className={`p-3 rounded-2xl border flex items-center gap-2 active:scale-95 transition-all col-span-2 ${
+                    viewMode === 'modern' ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-slate-50 border-slate-200 text-slate-800'
+                  }`}
+                >
+                  <Smartphone className="w-4 h-4 shrink-0 text-indigo-500" />
+                  <span className="truncate">📱 شێوازێ مۆدێرن (Modern Card View)</span>
+                </button>
+
+                <button
+                  onClick={() => { setShowTeacherSelectModal(true); setIsMobileMenuOpen(false); }}
+                  className="p-3 rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-900 flex items-center gap-2 active:scale-95 transition-all"
+                >
+                  <Users className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span className="truncate">مامۆستا ({allTeachersList.length})</span>
+                </button>
+
+                <button
+                  onClick={() => { setShowSwapModal(true); setIsMobileMenuOpen(false); }}
+                  className="p-3 rounded-2xl bg-purple-50 border border-purple-200 text-purple-900 flex items-center gap-2 active:scale-95 transition-all"
+                >
+                  <Shuffle className="w-4 h-4 text-purple-600 shrink-0" />
+                  <span className="truncate">گۆڕینەوەی وانە</span>
+                </button>
+
+                <button
+                  onClick={() => { setShowAdminModal(true); setIsMobileMenuOpen(false); }}
+                  className="p-3 rounded-2xl bg-yellow-50 border border-yellow-300 text-yellow-900 flex items-center gap-2 active:scale-95 transition-all"
+                >
+                  <ShieldCheck className="w-4 h-4 text-yellow-600 shrink-0" />
+                  <span className="truncate">ئەدمین</span>
+                </button>
+
+                <button
+                  onClick={() => { setShowWallpaperModal(true); setIsMobileMenuOpen(false); }}
+                  className="p-3 rounded-2xl bg-cyan-50 border border-cyan-200 text-cyan-800 flex items-center gap-2 active:scale-95 transition-all"
+                >
+                  <Smartphone className="w-4 h-4 text-cyan-600 shrink-0" />
+                  <span className="truncate">شاشەیا قوفلێ</span>
+                </button>
+
+                <button
+                  onClick={() => { setShowWidgetModal(true); setIsMobileMenuOpen(false); setTimeout(renderWidgetCanvas, 50); }}
+                  className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex items-center gap-2 active:scale-95 transition-all"
+                >
+                  <LayoutGrid className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span className="truncate">ویجێتێن شاشەی</span>
+                </button>
+
+                <button
+                  onClick={() => { setShowAiImportModal(true); setIsMobileMenuOpen(false); }}
+                  className="p-3 rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-700 flex items-center gap-2 active:scale-95 transition-all"
+                >
+                  <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span className="truncate">Gemini AI</span>
+                </button>
+
+                <button
+                  onClick={() => { setViewMode(viewMode === 'live' ? 'modern' : 'live'); setIsMobileMenuOpen(false); }}
+                  className={`p-3 rounded-2xl border flex items-center gap-2 active:scale-95 transition-all ${
+                    viewMode === 'live' ? 'bg-red-500 text-white border-red-500' : 'bg-white border-slate-200 text-slate-700'
+                  }`}
+                >
+                  <MonitorPlay className="w-4 h-4 shrink-0" />
+                  <span className="truncate">مۆدا زیندی</span>
+                </button>
+
+                <button
+                  onClick={() => { setSettingsActiveTab('storage'); setShowSettingsModal(true); setIsMobileMenuOpen(false); }}
+                  className="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-slate-700 flex items-center gap-2 active:scale-95 transition-all"
+                >
+                  <HardDrive className="w-4 h-4 text-cyan-600 shrink-0" />
+                  <span className="truncate">بیرگەی ناوخۆیی</span>
+                </button>
+
+                <button
+                  onClick={() => { setShowSettingsModal(true); setIsMobileMenuOpen(false); }}
+                  className="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-slate-700 flex items-center gap-2 active:scale-95 transition-all"
+                >
+                  <Settings className="w-4 h-4 text-slate-600 shrink-0" />
+                  <span className="truncate">ڕێکخستنێن دەم</span>
+                </button>
+
+                <button
+                  onClick={() => { saveToLocal(); setIsMobileMenuOpen(false); }}
+                  className="p-3 rounded-2xl bg-emerald-600 text-white flex items-center gap-2 active:scale-95 transition-all"
+                >
+                  <Save className="w-4 h-4 shrink-0" />
+                  <span className="truncate">پاشکەفتن</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </header>
+
+      {/* Top View Mode Switcher Pills (Classic Matrix Table vs Modern Cards vs Live Mode) */}
+      <div className="max-w-6xl mx-auto px-3 sm:px-4 pt-3 pb-1 no-print">
+        <div className="bg-slate-200/90 backdrop-blur-md p-1.5 rounded-2xl flex items-center justify-between gap-1 max-w-md mx-auto text-xs font-black shadow-inner border border-slate-300/50">
+          <button
+            onClick={() => setViewMode('classic')}
+            className={`flex-1 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+              viewMode === 'classic'
+                ? 'bg-indigo-600 text-white shadow-md scale-[1.02]'
+                : 'text-slate-700 hover:bg-slate-300/60'
+            }`}
+          >
+            <Grid className="w-4 h-4 text-yellow-300" />
+            <span>شێوازێ خشتێ (Table)</span>
+          </button>
+
+          <button
+            onClick={() => setViewMode('modern')}
+            className={`flex-1 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+              viewMode === 'modern'
+                ? 'bg-indigo-600 text-white shadow-md scale-[1.02]'
+                : 'text-slate-700 hover:bg-slate-300/60'
+            }`}
+          >
+            <Smartphone className="w-4 h-4" />
+            <span>مۆدێرن (Cards)</span>
+          </button>
+
+          <button
+            onClick={() => setViewMode('live')}
+            className={`flex-1 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+              viewMode === 'live'
+                ? 'bg-red-500 text-white shadow-md scale-[1.02]'
+                : 'text-slate-700 hover:bg-slate-300/60'
+            }`}
+          >
+            <MonitorPlay className="w-4 h-4" />
+            <span>مۆدا زیندی</span>
+          </button>
+        </div>
+      </div>
 
       {/* VIEW: LIVE MODE */}
       {viewMode === 'live' ? (
@@ -4822,49 +6978,49 @@ const App: React.FC = () => {
       )}
 
       {/* Mobile Bottom Navigation Bar */}
-      <footer className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-slate-200 px-4 py-3 flex items-center justify-around z-40 md:hidden no-print shadow-lg">
+      <footer className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-slate-200 px-3 py-2 flex items-center justify-around z-40 lg:hidden no-print shadow-2xl">
         <button
-          onClick={() => setViewMode('live')}
-          className="flex flex-col items-center gap-1 text-red-500 active:scale-90 transition-all"
+          onClick={() => setShowTeacherSelectModal(true)}
+          className="flex flex-col items-center gap-0.5 text-indigo-700 active:scale-90 transition-all"
         >
-          <MonitorPlay className="w-5 h-5" />
-          <span className="text-[10px] font-black">زیندی</span>
+          <Users className="w-5 h-5" />
+          <span className="text-[10px] font-black">مامۆستا</span>
         </button>
 
         <button
-          onClick={() => setShowAiImportModal(true)}
-          className="flex flex-col items-center gap-1 text-indigo-600 active:scale-90 transition-all"
+          onClick={() => setShowSwapModal(true)}
+          className="flex flex-col items-center gap-0.5 text-purple-700 active:scale-90 transition-all"
         >
-          <Sparkles className="w-5 h-5" />
-          <span className="text-[10px] font-black">AI خشتە</span>
+          <Shuffle className="w-5 h-5" />
+          <span className="text-[10px] font-black">گۆڕینەوە</span>
         </button>
 
         {/* Center Save Button */}
         <div
-          className="w-14 h-14 rounded-full flex items-center justify-center -mt-8 shadow-xl border-4 border-white active:scale-90 transition-all cursor-pointer text-white"
+          className="w-13 h-13 rounded-full flex items-center justify-center -mt-6 shadow-xl border-4 border-white active:scale-90 transition-all cursor-pointer text-white"
           onClick={saveToLocal}
           style={{ backgroundColor: isSaved ? '#059669' : 'var(--primary-color)' }}
+          title="پاشکەفتن"
         >
           {isSaved ? <CheckCircle className="w-6 h-6" /> : <Save className="w-6 h-6" />}
         </div>
 
         <button
-          onClick={() => setViewMode(viewMode === 'classic' ? 'modern' : 'classic')}
-          className="flex flex-col items-center gap-1 text-slate-600 active:scale-90 transition-all"
+          onClick={() => setShowAdminModal(true)}
+          className="flex flex-col items-center gap-0.5 text-yellow-700 active:scale-90 transition-all"
         >
-          <Grid className="w-5 h-5" />
-          <span className="text-[10px] font-black">{viewMode === 'classic' ? 'مۆدێرن' : 'خشتە'}</span>
+          <ShieldCheck className="w-5 h-5" />
+          <span className="text-[10px] font-black">ئەدمین</span>
         </button>
 
         <button
-          onClick={() => setShowSettingsModal(true)}
-          className="flex flex-col items-center gap-1 text-slate-600 active:scale-90 transition-all relative"
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          className={`flex flex-col items-center gap-0.5 active:scale-90 transition-all ${
+            isMobileMenuOpen ? 'text-indigo-600 font-extrabold' : 'text-slate-600'
+          }`}
         >
-          <Settings className="w-5 h-5" />
-          <span className="text-[10px] font-black">ڕێکخستن</span>
-          {alarmSettings.examSettings?.enabled && (
-            <span className="w-2 h-2 rounded-full bg-purple-600 absolute top-0 right-3" />
-          )}
+          {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          <span className="text-[10px] font-black">مێنیو</span>
         </button>
       </footer>
 
