@@ -126,7 +126,7 @@ CRITICAL EXTRACTION RULES:
    - Make sure every day has the EXACT same array length corresponding to the total period count (e.g. exactly 6 elements for 6 periods).
 
 4. TEACHER & SUBJECT EXTRACTION:
-   - Teacher Name: Look at the top title (e.g. "م حسێن", "م. حوسێن", "مامۆستا حسێن").
+   - Teacher Name: Look at the top title (e.g. "مامۆستا").
    - Subject Name: Look at small text inside cells or top title (e.g. "کیمیا", "فیزیا", "بیرکاری", "زانست", "کوردی", etc.).
 
 ${customPromptStr ? `USER SPECIAL INSTRUCTION: ${customPromptStr}` : ""}
@@ -300,6 +300,7 @@ import {
   CheckCircle,
   LayoutGrid,
   Bell,
+  BellRing,
   Settings,
   X,
   Play,
@@ -509,12 +510,12 @@ export const reconcileScheduleWithDayShifts = (
 
 const DEFAULT_SEED_TEACHERS: TeacherTimetableDoc[] = [
   {
-    id: 'teacher_hussein',
-    teacherName: 'م حسێن',
+    id: 'teacher_default',
+    teacherName: 'مامۆستایێ هێژا',
     subject: 'کیمیا',
     lessonCountPerDay: 6,
     schedule: INITIAL_SCHEDULE,
-    notes: 'م حسێن - کیمیا',
+    notes: 'مامۆستایێ هێژا - کیمیا',
     updatedAt: new Date().toISOString()
   },
   {
@@ -697,7 +698,14 @@ const App: React.FC = () => {
   const [readyVoices, setReadyVoices] = useState<string[]>([]);
   const [voiceGender, setVoiceGender] = useState<'male' | 'female'>('male');
   const [customScripts, setCustomScripts] = useState<Record<string, string>>(VOICE_SCRIPTS);
-  const [teacherName, setTeacherName] = useState<string>(() => localStorage.getItem('teacher_name') || "ماموستا حوسێن");
+  const [teacherName, setTeacherName] = useState<string>(() => {
+    const saved = localStorage.getItem('teacher_name');
+    if (saved && (saved.includes('حسێن') || saved.includes('حوسێن'))) {
+      return 'مامۆستایێ هێژا';
+    }
+    return saved || 'مامۆستایێ هێژا';
+  });
+  const [compactWidgetMode, setCompactWidgetMode] = useState<boolean>(false);
   const [teacherSubject, setTeacherSubject] = useState<string>(() => localStorage.getItem('teacher_subject') || "کیمیا");
   const [activeTheme, setActiveTheme] = useState(THEMES[0]);
   const [fitMobileScreen, setFitMobileScreen] = useState<boolean>(() => {
@@ -825,9 +833,13 @@ const App: React.FC = () => {
             mergedShifts['چوارشەمبی'] = 'morning';
             mergedShifts['پێنچ شەمبی'] = 'morning';
           }
+          const scriptStr = parsed.universalScript && (parsed.universalScript.includes('حسێن') || parsed.universalScript.includes('حوسێن'))
+            ? "مامۆستایێ هێژا دەرس دەست پێ دکەت - هیڤیدارم بچنە پۆلێ دگەل رێزو سلاڤان"
+            : (parsed.universalScript || DEFAULT_ALARM_SETTINGS.universalScript);
           return {
             ...DEFAULT_ALARM_SETTINGS,
             ...parsed,
+            universalScript: scriptStr,
             _v10SunMonShiftMigrated: true,
             dayShifts: mergedShifts,
             examSettings: { ...DEFAULT_ALARM_SETTINGS.examSettings, ...(parsed.examSettings || {}) }
@@ -863,7 +875,7 @@ const App: React.FC = () => {
 
   // Multi-Teacher & Firestore Sync State (100% Offline Cached)
   const [allTeachersList, setAllTeachersList] = useState<TeacherTimetableDoc[]>(getInitialAllTeachersList);
-  const [selectedTeacherId, setSelectedTeacherId] = useState<string>(() => localStorage.getItem('selected_teacher_id') || 'teacher_hussein');
+  const [selectedTeacherId, setSelectedTeacherId] = useState<string>(() => localStorage.getItem('selected_teacher_id') || 'teacher_default');
   const [showTeacherSelectModal, setShowTeacherSelectModal] = useState<boolean>(() => !localStorage.getItem('selected_teacher_id'));
   const [teacherSearchTerm, setTeacherSearchTerm] = useState<string>('');
   const [selectedGradeFilter, setSelectedGradeFilter] = useState<string>('all');
@@ -991,6 +1003,27 @@ const App: React.FC = () => {
     };
     restoreOfflineTeachersFromIDB();
   }, []);
+
+  // 1.2 Auto-Scrub legacy "حسێن" / "حوسێن" / "Hussein" references globally from state & storage
+  useEffect(() => {
+    const scrubbedName = 'مامۆستایێ هێژا';
+    const scrubbedScript = "مامۆستایێ هێژا دەرس دەست پێ دکەت - هیڤیدارم بچنە پۆلێ دگەل رێزو سلاڤان";
+
+    if (teacherName.includes('حسێن') || teacherName.includes('حوسێن') || teacherName.toLowerCase().includes('hussein')) {
+      setTeacherName(scrubbedName);
+      localStorage.setItem('teacher_name', scrubbedName);
+      saveBackupData('teacher_name', scrubbedName);
+    }
+
+    if (alarmSettings.universalScript && (alarmSettings.universalScript.includes('حسێن') || alarmSettings.universalScript.includes('حوسێن') || alarmSettings.universalScript.toLowerCase().includes('hussein'))) {
+      setAlarmSettings(prev => {
+        const updated = { ...prev, universalScript: scrubbedScript };
+        localStorage.setItem('alarm_settings_v10', JSON.stringify(updated));
+        saveBackupData('alarm_settings_v10', updated);
+        return updated;
+      });
+    }
+  }, [teacherName, alarmSettings.universalScript]);
 
   // 1.5 Auto-Reconcile Cached Timetables with current day shifts and lesson timings
   useEffect(() => {
@@ -1150,11 +1183,27 @@ const App: React.FC = () => {
       changesSummary.push(`دەستکاریا کات یان وانان لە لایەن مامۆستا ${teacherName}`);
     }
 
+    // Update allTeachersList locally for ONLY this teacher
+    setAllTeachersList((prev) => {
+      const updated = prev.map((t) => {
+        if (t.id === selectedTeacherId || t.teacherName === teacherName) {
+          return { ...t, schedule: updatedSchedule, updatedAt: new Date().toISOString() };
+        }
+        return t;
+      });
+      try {
+        localStorage.setItem(OFFLINE_TEACHERS_STORAGE_KEY, JSON.stringify(updated));
+        saveBackupData(OFFLINE_TEACHERS_STORAGE_KEY, updated);
+      } catch (e) {}
+      return updated;
+    });
+
     // 3. Online submit proposal to admin
-    const reqId = `req_${(selectedTeacherId || 'teacher').replace(/\s+/g, '_')}_${Date.now()}`;
+    const cleanTeacherId = selectedTeacherId || `teacher_${teacherName.trim().replace(/\s+/g, '_')}`;
+    const reqId = `req_${cleanTeacherId.replace(/\s+/g, '_')}_${Date.now()}`;
     const changeReq: ScheduleChangeRequest = {
       id: reqId,
-      teacherId: selectedTeacherId || 'teacher_hussein',
+      teacherId: cleanTeacherId,
       teacherName: teacherName,
       subject: teacherSubject,
       requestedSchedule: updatedSchedule,
@@ -1998,7 +2047,7 @@ const App: React.FC = () => {
   const exportLocalStorageBackup = () => {
     const backupData = {
       version: "2.0",
-      appName: "جەتوەلا من - ماموستا حوسێن",
+      appName: "جەتوەلا من",
       exportedAt: new Date().toISOString(),
       schedule,
       alarmSettings,
@@ -3701,6 +3750,63 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {/* Compact Floating Widget Mode Overlay (Hides main application) */}
+      {compactWidgetMode && (
+        <div className="fixed inset-0 z-[150] bg-slate-950/95 backdrop-blur-3xl flex flex-col items-center justify-center p-6 text-white text-center space-y-6 animate-in fade-in duration-300">
+          <div className="p-6 bg-gradient-to-b from-indigo-950/90 to-slate-900/90 border-2 border-indigo-500/50 rounded-[2.5rem] shadow-2xl max-w-md w-full space-y-5 backdrop-blur-2xl">
+            <div className="flex items-center justify-between border-b border-indigo-800/80 pb-3">
+              <span className="flex items-center gap-2 text-yellow-300 text-xs font-black">
+                <span className="w-3.5 h-3.5 rounded-full bg-emerald-400 animate-ping" />
+                ⚡ مۆدا زیندی یا ویجێتێ شاشەی (Floating Live Widget)
+              </span>
+              <button
+                onClick={() => setCompactWidgetMode(false)}
+                className="px-3.5 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-2xl text-xs font-black transition-all border border-white/20 flex items-center gap-1.5 active:scale-95"
+              >
+                <Eye className="w-4 h-4 text-cyan-300" />
+                <span>نیشاندانا بەرنامەی</span>
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              <h2 className="text-5xl font-black text-white tracking-widest font-mono">
+                {manualTimeStr || realTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}
+              </h2>
+              <p className="text-xs text-indigo-200 font-bold">{getFormattedFullKurdishDate(realTime)}</p>
+            </div>
+
+            <div className="p-4 rounded-3xl bg-indigo-950/90 border border-indigo-700/60 space-y-2 shadow-inner">
+              <div className="text-xs font-extrabold text-amber-300 flex items-center justify-center gap-1.5">
+                <Timer className="w-4 h-4 animate-spin" />
+                <span>دەمێ مایی بۆ دەستپێکرن / خلاس بوونێ:</span>
+              </div>
+              <p className="text-4xl font-black text-amber-400 font-mono tracking-widest">{timeRemaining || '00:00'}</p>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="p-3 bg-white/5 rounded-2xl border border-white/10 flex justify-between items-center">
+                <span className="text-slate-400 font-bold">وانا نوکە:</span>
+                <span className="text-emerald-400 font-black text-sm">{currentLiveSlot.slot ? currentLiveSlot.slot.className : 'فەراغ / بێ وانە'}</span>
+              </div>
+              {nextLiveSlot && (
+                <div className="p-3 bg-white/5 rounded-2xl border border-white/10 flex justify-between items-center">
+                  <span className="text-slate-400 font-bold">وانا داهاتی:</span>
+                  <span className="text-indigo-300 font-bold text-xs">{nextLiveSlot.className} ({nextLiveSlot.startTime})</span>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={() => playAlarmBellSound('10 - ب', 'start')}
+              className="w-full py-3.5 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs rounded-2xl shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all"
+            >
+              <Bell className="w-4 h-4 text-slate-950" />
+              <span>تاقیکرنا جەرەسی (Test Bell Sound)</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Alarm ringing full-screen modal */}
       {activeAlarm && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
@@ -3829,7 +3935,7 @@ const App: React.FC = () => {
                         setTeacherName(e.target.value);
                         localStorage.setItem('teacher_name', e.target.value);
                       }}
-                      placeholder="نموونە: ماموستا حوسێن"
+                      placeholder="نموونە: ماموستا"
                       className="w-full text-xs p-2.5 bg-white border border-slate-200 rounded-xl font-bold outline-none focus:border-indigo-500"
                     />
                   </div>
@@ -4140,17 +4246,31 @@ const App: React.FC = () => {
                     </div>
                   </div>
 
-                  <button
-                    onClick={togglePipWidget}
-                    className={`px-4 py-2.5 rounded-2xl text-xs font-black shadow-md flex items-center gap-2 transition-all active:scale-95 ${
-                      pipActive
-                        ? 'bg-red-600 hover:bg-red-700 text-white animate-pulse'
-                        : 'bg-amber-600 hover:bg-amber-700 text-white'
-                    }`}
-                  >
-                    <MonitorPlay className="w-4 h-4" />
-                    <span>{pipActive ? 'ڕاوەستاندنا ویجێتێ زێندە' : '⚡ ڤەکرنا ویجێتێ زێندە'}</span>
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={togglePipWidget}
+                      className={`px-4 py-2.5 rounded-2xl text-xs font-black shadow-md flex items-center gap-2 transition-all active:scale-95 ${
+                        pipActive
+                          ? 'bg-red-600 hover:bg-red-700 text-white animate-pulse'
+                          : 'bg-amber-600 hover:bg-amber-700 text-white'
+                      }`}
+                    >
+                      <MonitorPlay className="w-4 h-4" />
+                      <span>{pipActive ? 'ڕاوەستاندنا ویجێتێ زێندە' : '⚡ ڤەکرنا ویجێتێ زێندە'}</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setCompactWidgetMode(true);
+                        setShowWidgetModal(false);
+                      }}
+                      className="px-4 py-2.5 rounded-2xl text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white shadow-md flex items-center gap-2 transition-all active:scale-95"
+                      title="حەشارتنا بەرنامەی بۆ کۆمپاڵت ویجێت"
+                    >
+                      <EyeOff className="w-4 h-4 text-cyan-300" />
+                      <span>👁️ حەشارتنا بەرنامەی (تەنێ مۆدا زیندی)</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -4347,7 +4467,7 @@ const App: React.FC = () => {
                       className="w-16 h-16 rounded-2xl object-cover border-2 border-indigo-200 shadow-sm"
                     />
                     <div>
-                      <h4 className="font-black text-sm text-indigo-950">وێنەیێ تە هنارتی (جەتوەلا م. حوسێن - کیمیا)</h4>
+                      <h4 className="font-black text-sm text-indigo-950">وێنەیێ تە هنارتی (جەتوەلا ماموستای - کیمیا)</h4>
                       <p className="text-[11px] text-indigo-700 font-medium mt-0.5">
                         ئێکسەر ب ڤی وێنەیێ تە تاقی بکە داکو جەتوەلێ ئۆتۆماتیکی دابمەزرینیت
                       </p>
@@ -5148,23 +5268,120 @@ const App: React.FC = () => {
                       })}
                     </div>
 
-                    {/* Custom Audio URL input if custom_url is selected */}
+                    {/* Custom Audio URL or Mobile File Upload */}
                     {alarmSettings.soundStyle === 'custom_url' && (
-                      <div className="pt-2 space-y-2">
-                        <label className="text-[11px] font-black text-slate-700 block">لینک یان ئادرێسی فایلی MP3 دڵخواز:</label>
-                        <input
-                          type="url"
-                          value={alarmSettings.soundUrl || ''}
-                          onChange={(e) => {
-                            const updated = { ...alarmSettings, soundUrl: e.target.value };
-                            setAlarmSettings(updated);
-                            localStorage.setItem('alarm_settings_v9', JSON.stringify(updated));
-                          }}
-                          placeholder="https://example.com/bell.mp3"
-                          className="w-full text-xs p-3 bg-white border border-slate-300 rounded-2xl outline-none font-mono"
-                        />
+                      <div className="pt-2 space-y-3 p-3 bg-white/80 rounded-2xl border border-amber-200">
+                        <label className="text-[11px] font-black text-slate-800 block">
+                          📂 هەڵبژاردنی فایلی دەنگی ل سەر مۆبایلێ یان لێنکی دەنگی:
+                        </label>
+
+                        <div className="flex flex-col sm:flex-row items-center gap-2">
+                          <label
+                            htmlFor="mobile-bell-file-upload-input"
+                            className="w-full sm:w-auto flex-1 py-3 px-4 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-black text-xs rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all"
+                          >
+                            <Upload className="w-4 h-4 text-yellow-300" />
+                            <span>🎵 هەڵبژاردنی فایلی دەنگی (MP3 / WAV) لە مۆبایل دا</span>
+                          </label>
+                          <input
+                            id="mobile-bell-file-upload-input"
+                            type="file"
+                            accept="audio/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onload = (evt) => {
+                                  const dataUrl = evt.target?.result as string;
+                                  if (dataUrl) {
+                                    const updated = { ...alarmSettings, soundStyle: 'custom_url' as const, soundUrl: dataUrl };
+                                    setAlarmSettings(updated);
+                                    localStorage.setItem('alarm_settings_v10', JSON.stringify(updated));
+                                    saveBackupData('alarm_settings_v10', updated);
+                                    alert(`🎉 فایلی دەنگیی [${file.name}] لە مۆبایلەکەتدا ب سەرکەفتی دیاری بوو!`);
+                                  }
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                            }}
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-extrabold text-slate-400 block">یان ئادرێسی فایلی MP3 دەستکرد بنڤیسە:</span>
+                          <input
+                            type="url"
+                            value={alarmSettings.soundUrl || ''}
+                            onChange={(e) => {
+                              const updated = { ...alarmSettings, soundUrl: e.target.value };
+                              setAlarmSettings(updated);
+                              localStorage.setItem('alarm_settings_v10', JSON.stringify(updated));
+                            }}
+                            placeholder="https://example.com/bell.mp3"
+                            className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-xl outline-none font-mono"
+                          />
+                        </div>
+
+                        {alarmSettings.soundUrl && (
+                          <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs font-bold text-emerald-900">
+                            <span className="flex items-center gap-1.5">
+                              <Check className="w-4 h-4 text-emerald-600" /> فایلی دەنگیی مۆبایلێ چالاکە
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                try {
+                                  const audio = new Audio(alarmSettings.soundUrl);
+                                  audio.play();
+                                } catch (e) {
+                                  alert("کێشەیەک لە لێدانی فایلی دەنگیدا هەیە");
+                                }
+                              }}
+                              className="px-3 py-1 bg-emerald-600 text-white rounded-lg font-black text-[11px] flex items-center gap-1"
+                            >
+                              <Play className="w-3.5 h-3.5" /> تاقیکرن
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
+                  </div>
+
+                  {/* BACKGROUND & SYSTEM NOTIFICATIONS CARD */}
+                  <div className="p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-3xl border border-indigo-200 shadow-xs space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-indigo-600 text-white rounded-2xl shadow-md">
+                          <BellRing className="w-5 h-5 animate-pulse" />
+                        </div>
+                        <div>
+                          <h4 className="font-black text-xs text-indigo-950">جەرەسی پاشبنەما و شاشەیا قوفلێ (Background System Alarms)</h4>
+                          <p className="text-[11px] text-indigo-700 font-medium">لێدانی جەرەس و نیشاندانی ئاگاداری ڕاستەوخۆ تەنانەت ئەگەر بەرنامە داخرابێت یان شاشە قوفل بێت</p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if ("Notification" in window) {
+                            const perm = await Notification.requestPermission();
+                            if (perm === 'granted') {
+                              alert("🎉 ڕێپێدانی ئاگادارییەکانی پاشبنەما بە سەرکەوتوویی کارا بوو!");
+                              sendNotification("🔔 ئاگاداریی جەرەسی پاشبنەما", "جەرەسی پاشبنەما لە سەر مۆبایلەکەت چالاکە!");
+                            } else {
+                              alert("ڕێپێدان نەدراوە! تکایە لە ڕێکخستنەکانی وێبگەڕدا (Browser Settings) ئاگادارییەکان ڕێپێبدە.");
+                            }
+                          } else {
+                            alert("وێبگەڕەکەت پشتگیری ئاگاداری ناکات.");
+                          }
+                        }}
+                        className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-black text-xs rounded-xl shadow-md flex items-center gap-1.5 transition-all"
+                      >
+                        <ShieldCheck className="w-4 h-4 text-yellow-300" />
+                        <span>ڕێپێدانی ئاگاداری</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* FILTER FREE PERIODS CARD */}

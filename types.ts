@@ -31,7 +31,7 @@ export interface ExamSettings {
 
 export interface AlarmSettings {
   useUniversalSound?: boolean;  // If true, plays a single bell/voice alert for ALL classes and subjects
-  universalScript?: string;     // Universal voice script e.g. "ماموستا حسێنێ بەرێز دەرس دەست پێ دکەت"
+  universalScript?: string;     // Universal voice script e.g. "مامۆستایێ هێژا دەرس دەست پێ دکەت"
   soundStyle?: 'school_bell' | 'digital_chime' | 'soft_beep' | 'voice' | 'custom_url';
   skipFreePeriods?: boolean;    // If true, skips bell ring on empty/free periods ('بێ وانە' or 'فەراغ')
   minutesBeforeStart: number; // Offset for start of lesson

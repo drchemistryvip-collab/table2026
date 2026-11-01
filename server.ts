@@ -168,7 +168,7 @@ CRITICAL EXTRACTION RULES:
    - Make sure every day has the EXACT same array length corresponding to the total period count (e.g. exactly 6 elements for 6 periods).
 
 4. TEACHER & SUBJECT EXTRACTION:
-   - Teacher Name: Look at the top title (e.g. "م حسێن", "م. حوسێن", "مامۆستا حسێن").
+   - Teacher Name: Look at the top title (e.g. "مامۆستا").
    - Subject Name: Look at small text inside cells or top title (e.g. "کیمیا", "فیزیا", "بیرکاری", "زانست", "کوردی", etc.).
 
 ${customPrompt ? `USER SPECIAL INSTRUCTION: ${customPrompt}` : ""}
