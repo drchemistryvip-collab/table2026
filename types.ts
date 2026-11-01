@@ -32,6 +32,8 @@ export interface ExamSettings {
 export interface AlarmSettings {
   useUniversalSound?: boolean;  // If true, plays a single bell/voice alert for ALL classes and subjects
   universalScript?: string;     // Universal voice script e.g. "ماموستا حسێنێ بەرێز دەرس دەست پێ دکەت"
+  soundStyle?: 'school_bell' | 'digital_chime' | 'soft_beep' | 'voice' | 'custom_url';
+  skipFreePeriods?: boolean;    // If true, skips bell ring on empty/free periods ('بێ وانە' or 'فەراغ')
   minutesBeforeStart: number; // Offset for start of lesson
   minutesBeforeEnd: number;   // Offset for end of lesson
   soundUrl: string;
@@ -78,7 +80,9 @@ export const DEFAULT_DAY_SHIFTS: Record<string, ShiftType> = {
 
 export const DEFAULT_ALARM_SETTINGS: AlarmSettings = {
   useUniversalSound: false,
-  universalScript: "ماموستا حسێنێ بەرێز دەرس دەست پێ دکەت - هیڤیدارم بچنە پۆلێ دگەل رێزو سلاڤان",
+  universalScript: "مامۆستایێ هێژا دەرس دەست پێ دکەت - هیڤیدارم بچنە پۆلێ دگەل رێزو سلاڤان",
+  soundStyle: 'school_bell',
+  skipFreePeriods: true,
   minutesBeforeStart: 2,
   minutesBeforeEnd: 5,
   soundUrl: 'https://assets.mixkit.co/active_storage/sfx/2558/2558-preview.mp3',

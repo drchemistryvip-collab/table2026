@@ -687,6 +687,7 @@ const App: React.FC = () => {
   });
   const [activeDay, setActiveDay] = useState<string>(getKurdishDayName(new Date()));
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
+  const [editingScriptKey, setEditingScriptKey] = useState<string | null>(null);
   const [isSaved, setIsSaved] = useState<boolean>(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [settingsActiveTab, setSettingsActiveTab] = useState<'timing' | 'exam' | 'ai' | 'voice' | 'storage' | 'general'>('timing');
@@ -2373,6 +2374,123 @@ const App: React.FC = () => {
     return true;
   };
 
+  // Real synthesized dual-frequency ringing school bell sound (Web Audio API)
+  const playSynthesizedSchoolBell = (repeats: number = 3) => {
+    initAudioContext();
+    const ctx = audioContextRef.current;
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume();
+
+    for (let r = 0; r < repeats; r++) {
+      const startTime = ctx.currentTime + r * 1.2;
+      [587.33, 880.0, 1174.66].forEach((freq) => {
+        try {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, startTime);
+
+          gain.gain.setValueAtTime(0.001, startTime);
+          gain.gain.exponentialRampToValueAtTime(0.4, startTime + 0.04);
+          gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.9);
+
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+
+          osc.start(startTime);
+          osc.stop(startTime + 0.9);
+        } catch (e) {}
+      });
+    }
+  };
+
+  // Modern 4-note ascending digital chime (E5 -> G#5 -> B5 -> E6)
+  const playDigitalChime = (repeats: number = 2) => {
+    initAudioContext();
+    const ctx = audioContextRef.current;
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume();
+
+    const notes = [659.25, 830.61, 987.77, 1318.51];
+    for (let r = 0; r < repeats; r++) {
+      const baseTime = ctx.currentTime + r * 1.4;
+      notes.forEach((freq, idx) => {
+        try {
+          const t = baseTime + idx * 0.16;
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, t);
+          gain.gain.setValueAtTime(0.35, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.5);
+        } catch (e) {}
+      });
+    }
+  };
+
+  // Soft beep acoustic alert
+  const playSoftBeep = (repeats: number = 3) => {
+    initAudioContext();
+    const ctx = audioContextRef.current;
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume();
+
+    for (let r = 0; r < repeats; r++) {
+      const t = ctx.currentTime + r * 0.4;
+      try {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(800, t);
+        gain.gain.setValueAtTime(0.3, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.25);
+      } catch (e) {}
+    }
+  };
+
+  // Master Sound Playback Engine: Supports School Bell, Chime, Beep, Voice & Custom MP3/URL
+  const playAlarmBellSound = async (slotName: string, type: 'start' | 'end') => {
+    initAudioContext();
+    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+      await audioContextRef.current.resume();
+    }
+
+    const soundStyle = alarmSettings.soundStyle || 'school_bell';
+
+    if (soundStyle === 'school_bell') {
+      playSynthesizedSchoolBell(alarmSettings.repeatCount || 3);
+    } else if (soundStyle === 'digital_chime') {
+      playDigitalChime(alarmSettings.repeatCount || 2);
+    } else if (soundStyle === 'soft_beep') {
+      playSoftBeep(alarmSettings.repeatCount || 3);
+    } else if (soundStyle === 'voice') {
+      const isUniversal = alarmSettings.useUniversalSound;
+      const voiceKey = (type === 'end') ? 'end' : (isUniversal ? 'universal' : slotName);
+      const played = await playOfflineVoice(voiceKey, alarmSettings.repeatCount || 1);
+      if (!played) {
+        playSynthesizedSchoolBell(2);
+      }
+    } else if (soundStyle === 'custom_url' && alarmSettings.soundUrl) {
+      try {
+        const audio = new Audio(alarmSettings.soundUrl);
+        await audio.play();
+      } catch (e) {
+        playSynthesizedSchoolBell(2);
+      }
+    } else {
+      playSynthesizedSchoolBell(2);
+    }
+  };
+
   const sendNotification = (title: string, body: string) => {
     if ("Notification" in window && Notification.permission === "granted") {
       if (navigator.serviceWorker && navigator.serviceWorker.controller) {
@@ -3065,11 +3183,19 @@ const App: React.FC = () => {
         now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0');
 
       schedule[todayKurdish].slots.forEach((slot) => {
-        if (slot.className === 'بێ وانە') return;
+        const isEmpty = !slot.className || 
+          slot.className === 'بێ وانە' || 
+          slot.className === 'فەراغ' || 
+          slot.className.trim() === '' || 
+          slot.className.includes('بەتاڵ');
+
+        // SKIP empty / free periods when user has no class assigned
+        if (isEmpty && alarmSettings.skipFreePeriods !== false) return;
+
         const [sh, sm] = slot.startTime.split(':').map(Number);
         const startTime = new Date();
         startTime.setHours(sh, sm, 0, 0);
-        const triggerTimeStart = new Date(startTime.getTime() - alarmSettings.minutesBeforeStart * 60000);
+        const triggerTimeStart = new Date(startTime.getTime() - (alarmSettings.minutesBeforeStart || 0) * 60000);
         const triggerTimeStartStr =
           triggerTimeStart.getHours().toString().padStart(2, '0') +
           ":" +
@@ -3081,40 +3207,38 @@ const App: React.FC = () => {
             lastTriggeredRef.current = key;
             const isUniversal = alarmSettings.useUniversalSound;
             const msg = isUniversal
-              ? (alarmSettings.universalScript || customScripts['universal'] || `ماموستا حسێنێ بەرێز دەرس دەست پێ دکەت - پۆلا ${slot.className}`)
-              : (customScripts[slot.className] || `ماموستا حسێنێ بەرێز دەرس دەست پێ دکەت - پۆلا ${slot.className}`);
+              ? (alarmSettings.universalScript || customScripts['universal'] || `مامۆستایێ هێژا دەرس دەست پێ دکەت - پۆلا ${slot.className}`)
+              : (customScripts[slot.className] || `مامۆستایێ هێژا دەرس دەست پێ دکەت - پۆلا ${slot.className}`);
 
-            setActiveAlarm({ title: `دەستپێکرنا دەرسا ${slot.className}`, msg: msg });
+            setActiveAlarm({ title: `🔔 دەستپێکرنا دەرسا ${slot.className}`, msg: msg });
 
-            if (isUniversal) {
-              // Try playing universal offline voice first, fallback to class voice
-              playOfflineVoice('universal', alarmSettings.repeatCount).then((played) => {
-                if (!played) playOfflineVoice(slot.className, alarmSettings.repeatCount);
-              });
-            } else {
-              playOfflineVoice(slot.className, alarmSettings.repeatCount);
-            }
+            // Play selected bell sound / chime / voice
+            playAlarmBellSound(slot.className, 'start');
 
-            sendNotification(`ئاگاداری - وانێ ${slot.className}`, msg);
+            sendNotification(`🔔 ئاگاداری - وانێ ${slot.className}`, msg);
           }
         }
 
         const [eh, em] = slot.endTime.split(':').map(Number);
         const endTime = new Date();
         endTime.setHours(eh, em, 0, 0);
-        const triggerTimeEnd = new Date(endTime.getTime() - alarmSettings.minutesBeforeEnd * 60000);
+        const triggerTimeEnd = new Date(endTime.getTime() - (alarmSettings.minutesBeforeEnd || 0) * 60000);
         const triggerTimeEndStr =
           triggerTimeEnd.getHours().toString().padStart(2, '0') +
           ":" +
           triggerTimeEnd.getMinutes().toString().padStart(2, '0');
+
         if (currentTimeStr === triggerTimeEndStr && now.getSeconds() < 2) {
           const key = `${slot.id}-end-${triggerTimeEndStr}`;
           if (lastTriggeredRef.current !== key) {
             lastTriggeredRef.current = key;
-            const msg = customScripts['end'];
-            setActiveAlarm({ title: "دەرس بەرەف خلاس بوونێ یە", msg: msg });
-            playOfflineVoice('end', alarmSettings.repeatCount);
-            sendNotification("ئاگاداری - کۆتاییا وانێ", "دەرس بەرەف خلاس بوونێ یە");
+            const msg = customScripts['end'] || "دەرس بەرەف خلاس بوونێ یە";
+            setActiveAlarm({ title: "🔔 دەرس بەرەف خلاس بوونێ یە", msg: msg });
+
+            // Play selected bell sound / chime / voice
+            playAlarmBellSound(slot.className, 'end');
+
+            sendNotification("🔔 ئاگاداری - کۆتاییا وانێ", `دەرس بەرەف خلاس بوونێ یە (${slot.className})`);
           }
         }
       });
@@ -4968,16 +5092,184 @@ const App: React.FC = () => {
               {/* TAB 4: BELL & VOICES */}
               {settingsActiveTab === 'voice' && (
                 <div className="space-y-6">
-                  {/* Master Universal Bell Sound Toggle Card */}
-                  <div className="p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-3xl border-2 border-emerald-200 shadow-sm space-y-4">
-                    <div className="flex items-center justify-between">
+                  {/* SOUND STYLE SELECTOR CARD */}
+                  <div className="p-5 bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-indigo-500/10 rounded-3xl border-2 border-amber-300/80 shadow-md space-y-4">
+                    <div className="flex items-center justify-between border-b border-amber-200 pb-3">
                       <div className="flex items-center gap-3">
-                        <div className="p-3 bg-emerald-600 text-white rounded-2xl shadow-md">
+                        <div className="p-3 bg-amber-500 text-white rounded-2xl shadow-md">
                           <Bell className="w-6 h-6 animate-ring" />
                         </div>
                         <div>
-                          <h4 className="font-black text-sm text-emerald-950">دەنگێ گشتی / جەرەسێ قوتابخانێ بۆ هەمی وانان</h4>
-                          <p className="text-[11px] text-emerald-700 font-medium">ئێک دەنگ و زەنگ بۆ هەمی پۆل و بابەتان پێکڤە (یەکپارچە)</p>
+                          <h4 className="font-black text-sm text-slate-900">هەڵبژاردنی جۆری دەنگ و جەرەس (Bell Sound Style)</h4>
+                          <p className="text-[11px] text-slate-600 font-medium">دەتوانیت جۆری دەنگی جەرەس بە دڵی خۆت دیاری بکەیت</p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => playAlarmBellSound('10 - ب', 'start')}
+                        className="px-4 py-2 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-black text-xs rounded-xl shadow-md flex items-center gap-1.5 transition-all"
+                      >
+                        <Volume2 className="w-4 h-4" />
+                        <span>🧪 تاقیکرنی دەنگ</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                      {[
+                        { id: 'school_bell', label: '🔔 جەرەسا قوتابخانەیی', desc: 'دەنگی کلاسیکی جەرەس' },
+                        { id: 'digital_chime', label: '🎵 زەنگا دیجیتاڵی', desc: 'چایمی خاوێنی ٤ نۆتی' },
+                        { id: 'soft_beep', label: '🔔 زەنگا بیپ (Beep)', desc: 'بزرە و بیپی هێواش' },
+                        { id: 'voice', label: '📣 دەنگێ ڕاگەهاندنێ (AI)', desc: 'دەنگی کوردیی مامۆستا' },
+                        { id: 'custom_url', label: '📂 فایلی MP3 / Link', desc: 'بەستەری دەنگیی دڵخواز' },
+                      ].map((snd) => {
+                        const isSelected = (alarmSettings.soundStyle || 'school_bell') === snd.id;
+                        return (
+                          <button
+                            key={snd.id}
+                            type="button"
+                            onClick={() => {
+                              const updated = { ...alarmSettings, soundStyle: snd.id as any };
+                              setAlarmSettings(updated);
+                              localStorage.setItem('alarm_settings_v9', JSON.stringify(updated));
+                              saveBackupData('alarm_settings_v9', updated);
+                              playAlarmBellSound('10 - ب', 'start');
+                            }}
+                            className={`p-3.5 rounded-2xl border-2 transition-all flex flex-col items-start justify-center gap-1 text-right active:scale-95 ${
+                              isSelected
+                                ? 'bg-amber-500 text-white border-amber-500 shadow-md ring-2 ring-amber-300'
+                                : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-200'
+                            }`}
+                          >
+                            <span className="font-black text-xs">{snd.label}</span>
+                            <span className={`text-[10px] ${isSelected ? 'text-amber-100' : 'text-slate-500'}`}>{snd.desc}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Custom Audio URL input if custom_url is selected */}
+                    {alarmSettings.soundStyle === 'custom_url' && (
+                      <div className="pt-2 space-y-2">
+                        <label className="text-[11px] font-black text-slate-700 block">لینک یان ئادرێسی فایلی MP3 دڵخواز:</label>
+                        <input
+                          type="url"
+                          value={alarmSettings.soundUrl || ''}
+                          onChange={(e) => {
+                            const updated = { ...alarmSettings, soundUrl: e.target.value };
+                            setAlarmSettings(updated);
+                            localStorage.setItem('alarm_settings_v9', JSON.stringify(updated));
+                          }}
+                          placeholder="https://example.com/bell.mp3"
+                          className="w-full text-xs p-3 bg-white border border-slate-300 rounded-2xl outline-none font-mono"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* FILTER FREE PERIODS CARD */}
+                  <div className="p-4 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-indigo-100 text-indigo-800 rounded-2xl">
+                          <Coffee className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="font-black text-xs text-slate-900">لە وانە بەتاڵەکاندا (فەراغ / بێ وانە) جەرەس لێ نەدات</h4>
+                          <p className="text-[11px] text-slate-500 font-medium">کاتێک ئەمە چالاک بێت، تەنها لەو وانانەی دەرست هەیە جەرەس لێدەدات</p>
+                        </div>
+                      </div>
+
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={alarmSettings.skipFreePeriods !== false}
+                          onChange={(e) => {
+                            const updated = { ...alarmSettings, skipFreePeriods: e.target.checked };
+                            setAlarmSettings(updated);
+                            localStorage.setItem('alarm_settings_v9', JSON.stringify(updated));
+                            saveBackupData('alarm_settings_v9', updated);
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Alarm Offset Sliders */}
+                  <div className="space-y-4 p-5 bg-white rounded-3xl border border-slate-200 shadow-xs">
+                    <h3 className="text-xs font-black text-slate-800 flex items-center gap-1.5 border-b pb-2">
+                      <Clock className="w-4 h-4 text-amber-600" /> دەمێ ئاگەهداریا زەنگێ (دیاریکردنی خولەک لە پێشدا):
+                    </h3>
+
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs font-bold text-slate-700">
+                        <span>چەند خولەک بەری دەرس دەستپێبکەت جەرەس لێبدەت:</span>
+                        <span className="font-black px-2.5 py-0.5 rounded-lg bg-amber-100 text-amber-900">
+                          {alarmSettings.minutesBeforeStart === 0 ? "لە دەستپێکا ڕاستەوخۆ (0 خولەک)" : `${alarmSettings.minutesBeforeStart} خولەک بەری وانێ`}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="10"
+                        value={alarmSettings.minutesBeforeStart}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value);
+                          const updated = { ...alarmSettings, minutesBeforeStart: val };
+                          setAlarmSettings(updated);
+                          localStorage.setItem('alarm_settings_v9', JSON.stringify(updated));
+                        }}
+                        className="w-full h-2 bg-slate-200 rounded-lg cursor-pointer accent-amber-600"
+                      />
+                      <div className="flex justify-between text-[10px] text-slate-400 font-bold px-1">
+                        <span>0 خولەک (دەستپێک)</span>
+                        <span>2 خولەک</span>
+                        <span>5 خولەک</span>
+                        <span>10 خولەک بەری وانێ</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 pt-2 border-t border-slate-100">
+                      <div className="flex justify-between text-xs font-bold text-slate-700">
+                        <span>چەند خولەک بەری دەرس خلاس ببیت جەرەس لێبدەت:</span>
+                        <span className="font-black px-2.5 py-0.5 rounded-lg bg-indigo-100 text-indigo-900">
+                          {alarmSettings.minutesBeforeEnd === 0 ? "لە کۆتاییا ڕاستەوخۆ (0 خولەک)" : `${alarmSettings.minutesBeforeEnd} خولەک بەری کۆتایی`}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="10"
+                        value={alarmSettings.minutesBeforeEnd}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value);
+                          const updated = { ...alarmSettings, minutesBeforeEnd: val };
+                          setAlarmSettings(updated);
+                          localStorage.setItem('alarm_settings_v9', JSON.stringify(updated));
+                        }}
+                        className="w-full h-2 bg-slate-200 rounded-lg cursor-pointer accent-indigo-600"
+                      />
+                      <div className="flex justify-between text-[10px] text-slate-400 font-bold px-1">
+                        <span>0 خولەک (کۆتایی)</span>
+                        <span>2 خولەک</span>
+                        <span>5 خولەک</span>
+                        <span>10 خولەک بەری کۆتایی</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Master Universal Bell Sound Toggle Card */}
+                  <div className="p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-3xl border border-emerald-200 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 bg-emerald-600 text-white rounded-2xl shadow-md">
+                          <Mic className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="font-black text-sm text-emerald-950">دەنگێ ئاخڤتنا گشتی (AI Kurdish Voice Script)</h4>
+                          <p className="text-[11px] text-emerald-700 font-medium">ئەگەر جۆری دەنگ لەسەر AI Voice بێت، ئەم ڕاگەیاندنە بە دەنگ دەخوێنرێتەوە</p>
                         </div>
                       </div>
 
@@ -5000,7 +5292,7 @@ const App: React.FC = () => {
                     <div className="pt-3 border-t border-emerald-200/80 space-y-3">
                       <label className="text-[11px] font-black text-emerald-900 block">دەقێ ئاگەهداریا گشتی (Universal Voice Script):</label>
                       <textarea
-                        value={alarmSettings.universalScript || customScripts['universal'] || "ماموستا حسێنێ بەرێز دەرس دەست پێ دکەت - هیڤیدارم بچنە پۆلێ دگەل رێزو سلاڤان"}
+                        value={alarmSettings.universalScript || customScripts['universal'] || "مامۆستایێ هێژا دەرس دەست پێ دکەت - هیڤیدارم بچنە پۆلێ دگەل رێزو سلاڤان"}
                         onChange={(e) => {
                           const newScript = e.target.value;
                           setAlarmSettings((p) => ({ ...p, universalScript: newScript }));
@@ -5013,7 +5305,8 @@ const App: React.FC = () => {
 
                       <div className="flex flex-wrap items-center gap-2">
                         <button
-                          onClick={() => generateAndStoreVoice('universal', alarmSettings.universalScript || customScripts['universal'] || "ماموستا حسێنێ بەرێز دەرس دەست پێ دکەت")}
+                          type="button"
+                          onClick={() => generateAndStoreVoice('universal', alarmSettings.universalScript || customScripts['universal'] || "مامۆستایێ هێژا دەرس دەست پێ دکەت")}
                           disabled={generatingId !== null}
                           className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50"
                         >
@@ -5027,6 +5320,7 @@ const App: React.FC = () => {
 
                         {readyVoices.includes('universal') && (
                           <button
+                            type="button"
                             onClick={() => playOfflineVoice('universal', 1)}
                             className="p-2.5 bg-white text-emerald-700 hover:bg-emerald-100 rounded-xl border border-emerald-300 font-bold text-xs shadow-xs flex items-center gap-1.5 active:scale-95 transition-all"
                             title="تاقیکرنا دەنگی"
@@ -5035,62 +5329,7 @@ const App: React.FC = () => {
                             <span>تاقیکرن</span>
                           </button>
                         )}
-
-                        <label className="p-2.5 bg-white hover:bg-emerald-100 text-emerald-700 rounded-xl border border-emerald-300 font-bold text-xs cursor-pointer shadow-xs flex items-center gap-1.5 transition-all">
-                          <Upload className="w-4 h-4 text-emerald-600" />
-                          <span>بارکرنا فایلی MP3</span>
-                          <input
-                            type="file"
-                            accept="audio/*"
-                            className="hidden"
-                            onChange={(e) => e.target.files && handleFileUpload('universal', e.target.files[0])}
-                          />
-                        </label>
                       </div>
-                    </div>
-                  </div>
-                  {/* Alarm Offset Sliders */}
-                  <div className="space-y-4 p-4 bg-slate-50 rounded-2xl border border-slate-200">
-                    <h3 className="text-xs font-black text-slate-700 flex items-center gap-1.5">
-                      <Bell className="w-4 h-4 text-orange-600" /> دەمێ ئاگەهداریا زەنگێ (خولەک بەری وەختی):
-                    </h3>
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs font-bold text-slate-500">
-                        <span>بەری دەرس دەستپێبکەت:</span>
-                        <span className="font-black" style={{ color: 'var(--primary-color)' }}>
-                          {alarmSettings.minutesBeforeStart} خولەک
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="10"
-                        value={alarmSettings.minutesBeforeStart}
-                        onChange={(e) =>
-                          setAlarmSettings((p) => ({ ...p, minutesBeforeStart: parseInt(e.target.value) }))
-                        }
-                        className="w-full"
-                        style={{ accentColor: 'var(--primary-color)' }}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs font-bold text-slate-500">
-                        <span>بەری دەرس خلاس ببیت:</span>
-                        <span className="font-black" style={{ color: 'var(--primary-color)' }}>
-                          {alarmSettings.minutesBeforeEnd} خولەک
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="10"
-                        value={alarmSettings.minutesBeforeEnd}
-                        onChange={(e) =>
-                          setAlarmSettings((p) => ({ ...p, minutesBeforeEnd: parseInt(e.target.value) }))
-                        }
-                        className="w-full"
-                        style={{ accentColor: 'var(--primary-color)' }}
-                      />
                     </div>
                   </div>
 
