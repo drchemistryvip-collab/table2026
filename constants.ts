@@ -91,7 +91,8 @@ export const calculateSlotTimes = (
 export const generateSlotsForDay = (
   shift: ShiftType,
   classesPerLesson: string[],
-  settings: AlarmSettings = DEFAULT_ALARM_SETTINGS
+  settings: AlarmSettings = DEFAULT_ALARM_SETTINGS,
+  subjectName: string = 'کیمیا'
 ): LessonSlot[] => {
   const times = calculateSlotTimes(shift, settings);
   const count = settings.lessonCount || 6;
@@ -107,7 +108,7 @@ export const generateSlotsForDay = (
       startTime: timeInfo.start,
       endTime: timeInfo.end,
       className: rawClass,
-      subject: 'کیمیا',
+      subject: subjectName || 'کیمیا',
       isExam: timeInfo.isExam
     });
   }

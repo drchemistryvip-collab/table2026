@@ -461,7 +461,8 @@ export const getDayShift = (dayName: string, sched?: WeekSchedule, settings?: Al
 
 export const reconcileScheduleWithDayShifts = (
   sched: WeekSchedule,
-  settings: AlarmSettings = DEFAULT_ALARM_SETTINGS
+  settings: AlarmSettings = DEFAULT_ALARM_SETTINGS,
+  teacherSubjectParam?: string
 ): WeekSchedule => {
   if (!sched || typeof sched !== 'object') return INITIAL_SCHEDULE;
   const reconciled: WeekSchedule = {};
@@ -481,13 +482,16 @@ export const reconcileScheduleWithDayShifts = (
         isExam: false 
       };
       const ex = existingSlots[i];
+      const fallbackSubject = teacherSubjectParam || 'کیمیا';
+      const slotSub = (ex && ex.subject && ex.subject !== 'کیمیا') ? ex.subject : fallbackSubject;
+
       newSlots.push({
         id: ex ? ex.id : `slot_${dayName}_${i}_${Math.random().toString(36).substring(2, 6)}`,
         lessonNumber: i + 1,
         startTime: t.start,
         endTime: t.end,
         className: ex ? ex.className : 'بێ وانە',
-        subject: ex ? ex.subject : 'کیمیا',
+        subject: slotSub,
         isExam: t.isExam,
       });
     }
@@ -514,17 +518,86 @@ const DEFAULT_SEED_TEACHERS: TeacherTimetableDoc[] = [
     updatedAt: new Date().toISOString()
   },
   {
+    id: 'teacher_borhan',
+    teacherName: 'م. برهان',
+    subject: 'زیندەوەر',
+    lessonCountPerDay: 6,
+    schedule: reconcileScheduleWithDayShifts(
+      {
+        'ئێکشەمبی': { dayName: 'ئێکشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['11 - أ', '12 - هـ', 'بێ وانە', '12 - و', '12 - و', 'بێ وانە'], DEFAULT_ALARM_SETTINGS, 'زیندەوەر') },
+        'دووشەمبی': { dayName: 'دووشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['11 - أ', 'بێ وانە', '12 - و', '11 - ب', 'بێ وانە', 'بێ وانە'], DEFAULT_ALARM_SETTINGS, 'زیندەوەر') },
+        'سێشەمبی': { dayName: 'سێشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['12 - هـ', '12 - و', '11 - أ', 'بێ وانە', '11 - ب', '12 - و'], DEFAULT_ALARM_SETTINGS, 'زیندەوەر') },
+        'چوارشەمبی': { dayName: 'چوارشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['بێ وانە', 'بێ وانە', '12 - هـ', '11 - أ', '12 - و', '11 - ب'], DEFAULT_ALARM_SETTINGS, 'زیندەوەر') },
+        'پێنچ شەمبی': { dayName: 'پێنچ شەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['12 - و', 'بێ وانە', 'بێ وانە', '11 - ب', '12 - و', '12 - هـ'], DEFAULT_ALARM_SETTINGS, 'زیندەوەر') }
+      },
+      DEFAULT_ALARM_SETTINGS,
+      'زیندەوەر'
+    ),
+    notes: 'م. برهان - زیندەوەر',
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'teacher_shareef',
+    teacherName: 'م. شەیف',
+    subject: 'ز. ئینگلیزی',
+    lessonCountPerDay: 6,
+    schedule: reconcileScheduleWithDayShifts(
+      {
+        'ئێکشەمبی': { dayName: 'ئێکشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - أ', '11 - د', 'بێ وانە', '12 - أ', 'بێ وانە', '10 - ج'], DEFAULT_ALARM_SETTINGS, 'ز. ئینگلیزی') },
+        'دووشەمبی': { dayName: 'دووشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - د', '10 - أ', '11 - ج', 'بێ وانە', '12 - ب', 'بێ وانە'], DEFAULT_ALARM_SETTINGS, 'ز. ئینگلیزی') },
+        'سێشەمبی': { dayName: 'سێشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['11 - أ', '10 - ج', '12 - د', 'بێ وانە', '10 - أ', '11 - ب'], DEFAULT_ALARM_SETTINGS, 'ز. ئینگلیزی') },
+        'چوارشەمبی': { dayName: 'چوارشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['12 - أ', '11 - د', 'بێ وانە', '10 - أ', '11 - أ', '12 - ج'], DEFAULT_ALARM_SETTINGS, 'ز. ئینگلیزی') },
+        'پێنچ شەمبی': { dayName: 'پێنچ شەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - أ', '12 - ب', '11 - أ', 'بێ وانە', '10 - د', '11 - هـ'], DEFAULT_ALARM_SETTINGS, 'ز. ئینگلیزی') }
+      },
+      DEFAULT_ALARM_SETTINGS,
+      'ز. ئینگلیزی'
+    ),
+    notes: 'م. شەیف - ز. ئینگلیزی',
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'teacher_hardam',
+    teacherName: 'م. هەردەم',
+    subject: 'کیمیا',
+    lessonCountPerDay: 6,
+    schedule: reconcileScheduleWithDayShifts(INITIAL_SCHEDULE, DEFAULT_ALARM_SETTINGS, 'کیمیا'),
+    notes: 'م. هەردەم - کیمیا',
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'teacher_sonar',
+    teacherName: 'م. سنار',
+    subject: 'کیمیا',
+    lessonCountPerDay: 6,
+    schedule: reconcileScheduleWithDayShifts(INITIAL_SCHEDULE, DEFAULT_ALARM_SETTINGS, 'کیمیا'),
+    notes: 'م. سنار - کیمیا',
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'teacher_waleed',
+    teacherName: 'م. ولید',
+    subject: 'کیمیا',
+    lessonCountPerDay: 6,
+    schedule: reconcileScheduleWithDayShifts(INITIAL_SCHEDULE, DEFAULT_ALARM_SETTINGS, 'کیمیا'),
+    notes: 'م. ولید - کیمیا',
+    updatedAt: new Date().toISOString()
+  },
+  {
     id: 'teacher_ahmad',
     teacherName: 'م. ئەحمەد',
     subject: 'فیزیا',
     lessonCountPerDay: 6,
-    schedule: {
-      'ئێکشەمبی': { dayName: 'ئێکشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - د', '10 - ب', 'بێ وانە', '10 - و', 'بێ وانە', '10 - هـ']) },
-      'دووشەمبی': { dayName: 'دووشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - هـ', 'بێ وانە', '10 - ج', '10 - ب', 'بێ وانە', '10 - و']) },
-      'سێشەمبی': { dayName: 'سێشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - و', '10 - هـ', 'بێ وانە', '10 - د', 'بێ وانە', '10 - ج']) },
-      'چوارشەمبی': { dayName: 'چوارشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - ب', '10 - د', 'بێ وانە', '10 - هـ', '10 - ج', '10 - و']) },
-      'پێنچ شەمبی': { dayName: 'پێنچ شەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - د', '10 - و', 'بێ وانە', '10 - ب', 'بێ وانە', '10 - هـ']) }
-    },
+    schedule: reconcileScheduleWithDayShifts(
+      {
+        'ئێکشەمبی': { dayName: 'ئێکشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - د', '10 - ب', 'بێ وانە', '10 - و', 'بێ وانە', '10 - هـ'], DEFAULT_ALARM_SETTINGS, 'فیزیا') },
+        'دووشەمبی': { dayName: 'دووشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - هـ', 'بێ وانە', '10 - ج', '10 - ب', 'بێ وانە', '10 - و'], DEFAULT_ALARM_SETTINGS, 'فیزیا') },
+        'سێشەمبی': { dayName: 'سێشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - و', '10 - هـ', 'بێ وانە', '10 - د', 'بێ وانە', '10 - ج'], DEFAULT_ALARM_SETTINGS, 'فیزیا') },
+        'چوارشەمبی': { dayName: 'چوارشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - ب', '10 - د', 'بێ وانە', '10 - هـ', '10 - ج', '10 - و'], DEFAULT_ALARM_SETTINGS, 'فیزیا') },
+        'پێنچ شەمبی': { dayName: 'پێنچ شەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - د', '10 - و', 'بێ وانە', '10 - ب', 'بێ وانە', '10 - هـ'], DEFAULT_ALARM_SETTINGS, 'فیزیا') }
+      },
+      DEFAULT_ALARM_SETTINGS,
+      'فیزیا'
+    ),
     notes: 'م. ئەحمەد - فیزیا',
     updatedAt: new Date().toISOString()
   },
@@ -533,13 +606,17 @@ const DEFAULT_SEED_TEACHERS: TeacherTimetableDoc[] = [
     teacherName: 'م. ئاراز',
     subject: 'بیرکاری',
     lessonCountPerDay: 6,
-    schedule: {
-      'ئێکشەمبی': { dayName: 'ئێکشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - ج', 'بێ وانە', '10 - ب', '10 - د', 'بێ وانە', '10 - هـ']) },
-      'دووشەمبی': { dayName: 'دووشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - د', '10 - ج', 'بێ وانە', '10 - و', 'بێ وانە', '10 - ب']) },
-      'سێشەمبی': { dayName: 'سێشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - ب', '10 - د', 'بێ وانە', '10 - ج', 'بێ وانە', '10 - و']) },
-      'چوارشەمبی': { dayName: 'چوارشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - ج', '10 - و', 'بێ وانە', '10 - د', '10 - هـ', '10 - ب']) },
-      'پێنچ شەمبی': { dayName: 'پێنچ شەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - و', '10 - ب', 'بێ وانە', '10 - ج', 'بێ وانە', '10 - د']) }
-    },
+    schedule: reconcileScheduleWithDayShifts(
+      {
+        'ئێکشەمبی': { dayName: 'ئێکشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - ج', 'بێ وانە', '10 - ب', '10 - د', 'بێ وانە', '10 - هـ'], DEFAULT_ALARM_SETTINGS, 'بیرکاری') },
+        'دووشەمبی': { dayName: 'دووشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - د', '10 - ج', 'بێ وانە', '10 - و', 'بێ وانە', '10 - ب'], DEFAULT_ALARM_SETTINGS, 'بیرکاری') },
+        'سێشەمبی': { dayName: 'سێشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - ب', '10 - د', 'بێ وانە', '10 - ج', 'بێ وانە', '10 - و'], DEFAULT_ALARM_SETTINGS, 'بیرکاری') },
+        'چوارشەمبی': { dayName: 'چوارشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - ج', '10 - و', 'بێ وانە', '10 - د', '10 - هـ', '10 - ب'], DEFAULT_ALARM_SETTINGS, 'بیرکاری') },
+        'پێنچ شەمبی': { dayName: 'پێنچ شەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - و', '10 - ب', 'بێ وانە', '10 - ج', 'بێ وانە', '10 - د'], DEFAULT_ALARM_SETTINGS, 'بیرکاری') }
+      },
+      DEFAULT_ALARM_SETTINGS,
+      'بیرکاری'
+    ),
     notes: 'م. ئاراز - بیرکاری',
     updatedAt: new Date().toISOString()
   }
@@ -555,7 +632,7 @@ const getInitialAllTeachersList = (): TeacherTimetableDoc[] => {
       if (Array.isArray(parsed) && parsed.length > 0) {
         return parsed.map((t: TeacherTimetableDoc) => ({
           ...t,
-          schedule: reconcileScheduleWithDayShifts(t.schedule, DEFAULT_ALARM_SETTINGS)
+          schedule: reconcileScheduleWithDayShifts(t.schedule, DEFAULT_ALARM_SETTINGS, t.subject)
         }));
       }
     }
@@ -564,7 +641,7 @@ const getInitialAllTeachersList = (): TeacherTimetableDoc[] => {
   }
   return DEFAULT_SEED_TEACHERS.map((t) => ({
     ...t,
-    schedule: reconcileScheduleWithDayShifts(t.schedule, DEFAULT_ALARM_SETTINGS)
+    schedule: reconcileScheduleWithDayShifts(t.schedule, DEFAULT_ALARM_SETTINGS, t.subject)
   }));
 };
 
@@ -7988,7 +8065,7 @@ const App: React.FC = () => {
                           {slot.className !== 'بێ وانە' && (
                             <span className="flex items-center gap-1 text-[11px] font-black px-2.5 py-1 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-xs">
                               <GraduationCap className="w-3.5 h-3.5 text-indigo-500" />
-                              <span>{slot.subject || 'کیمیا'}</span>
+                              <span>{teacherSubject || (slot.subject && slot.subject !== 'کیمیا' ? slot.subject : 'کیمیا')}</span>
                             </span>
                           )}
                         </div>
@@ -8278,7 +8355,7 @@ const App: React.FC = () => {
                                       {slot.className}
                                     </span>
                                     <span className="text-[7px] sm:text-[10px] font-bold opacity-80 mt-0.5 truncate max-w-full">
-                                      {slot.subject || teacherSubject}
+                                      {teacherSubject || (slot.subject && slot.subject !== 'کیمیا' ? slot.subject : 'کیمیا')}
                                     </span>
                                     <span className="text-[7px] sm:text-[9px] font-mono opacity-70 mt-0.5 hidden sm:inline-block">
                                       {slot.startTime}
