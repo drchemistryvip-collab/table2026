@@ -131,3 +131,31 @@ export async function deleteTimetableFromFirestore(id: string) {
   }
 }
 
+// School Master Global Settings Collection (Syncs Shifts, Timings, Bells, Exams to Everyone)
+export const SCHOOL_SETTINGS_COLLECTION = 'school_settings';
+export const SETTINGS_GLOBAL_DOC = 'global_config';
+
+export async function fetchSchoolSettingsFromFirestore(): Promise<any | null> {
+  try {
+    const docRef = doc(db, SCHOOL_SETTINGS_COLLECTION, SETTINGS_GLOBAL_DOC);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      return docSnap.data();
+    }
+    return null;
+  } catch (err) {
+    console.warn("Could not fetch school settings from firestore:", err);
+    return null;
+  }
+}
+
+export async function saveSchoolSettingsToFirestore(settings: any) {
+  try {
+    const docRef = doc(db, SCHOOL_SETTINGS_COLLECTION, SETTINGS_GLOBAL_DOC);
+    await setDoc(docRef, { ...settings, updatedAt: new Date().toISOString() }, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `${SCHOOL_SETTINGS_COLLECTION}/${SETTINGS_GLOBAL_DOC}`);
+  }
+}
+
+

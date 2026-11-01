@@ -16,7 +16,11 @@ export const VOICE_SCRIPTS: Record<string, string> = {
 };
 
 /**
- * Calculates slot start/end times based on current settings, shift, and optional exam mode.
+ * Calculates slot start/end times based on current settings, shift, and exam mode.
+ * User requirement:
+ * On exam days:
+ * - Morning: normal lessons 35 mins. Lesson 1 finishes, immediately followed by Exam (40 mins), then break, then Lesson 2 starts.
+ * - Evening: normal lessons 30 mins. Lesson 1 finishes, immediately followed by Exam (40 mins), then break, then Lesson 2 starts.
  */
 export const calculateSlotTimes = (
   shift: ShiftType,
@@ -24,20 +28,24 @@ export const calculateSlotTimes = (
 ): { start: string; end: string; isExam: boolean }[] => {
   const times: { start: string; end: string; isExam: boolean }[] = [];
   const baseTimeStr = shift === 'morning' ? settings.morningStartTime : settings.eveningStartTime;
-  const [baseH, baseM] = (baseTimeStr || (shift === 'morning' ? "08:00" : "13:00")).split(':').map(Number);
+  const [baseH, baseM] = (baseTimeStr || (shift === 'morning' ? "08:00" : "12:30")).split(':').map(Number);
 
-  let currentMinutes = (isNaN(baseH) ? 8 : baseH) * 60 + (isNaN(baseM) ? 0 : baseM);
+  let currentMinutes = (isNaN(baseH) ? (shift === 'morning' ? 8 : 12) : baseH) * 60 + (isNaN(baseM) ? (shift === 'morning' ? 0 : 30) : baseM);
   const count = settings.lessonCount || 6;
   const exam = settings.examSettings;
+  const isExamDay = Boolean(exam?.enabled);
 
   for (let lessonIndex = 1; lessonIndex <= count; lessonIndex++) {
-    const isExamLesson = Boolean(exam?.enabled && exam.examLessonNumber === lessonIndex);
-    
+    // Determine lesson duration
     let lessonDuration: number;
-    if (exam?.enabled) {
-      lessonDuration = isExamLesson ? exam.examDuration : exam.otherLessonsDuration;
+    if (isExamDay) {
+      if (shift === 'morning') {
+        lessonDuration = exam.morningLessonDuration || 35;
+      } else {
+        lessonDuration = exam.eveningLessonDuration || 30;
+      }
     } else {
-      lessonDuration = shift === 'morning' ? settings.morningDuration : settings.eveningDuration;
+      lessonDuration = shift === 'morning' ? (settings.morningDuration || 35) : (settings.eveningDuration || 30);
     }
 
     const startH = Math.floor(currentMinutes / 60) % 24;
@@ -53,15 +61,21 @@ export const calculateSlotTimes = (
     times.push({
       start: startStr,
       end: endStr,
-      isExam: isExamLesson
+      isExam: false
     });
 
-    // Break after lesson
-    if (lessonIndex < count) {
+    // Handle post-lesson intervals:
+    // If Exam is enabled and this is the exam insertion point (after Lesson 1):
+    const examTargetLesson = exam?.examLessonNumber || 1;
+    if (isExamDay && lessonIndex === examTargetLesson) {
+      // Add exam duration (40 mins) + break after exam
+      const examMins = exam.examDuration || 40;
+      const breakAfterExam = exam.breakAfterExam !== undefined ? exam.breakAfterExam : 10;
+      currentMinutes += examMins + breakAfterExam;
+    } else if (lessonIndex < count) {
+      // Normal break between lessons
       let breakDuration = settings.defaultBreakDuration || 5;
-      if (exam?.enabled && isExamLesson) {
-        breakDuration = exam.breakAfterExam || 10;
-      } else if (lessonIndex === settings.longBreakLesson) {
+      if (lessonIndex === settings.longBreakLesson) {
         breakDuration = settings.longBreakDuration || 10;
       }
       currentMinutes += breakDuration;
@@ -84,7 +98,7 @@ export const generateSlotsForDay = (
   const slots: LessonSlot[] = [];
 
   for (let i = 0; i < count; i++) {
-    const timeInfo = times[i] || { start: "08:00", end: "08:40", isExam: false };
+    const timeInfo = times[i] || { start: "08:00", end: "08:35", isExam: false };
     const rawClass = classesPerLesson[i] || 'بێ وانە';
     
     slots.push({
@@ -100,17 +114,21 @@ export const generateSlotsForDay = (
   return slots;
 };
 
-// Extracted exactly from the user's provided official timetable photo
+/**
+ * Shift Schedule matching the user requirement:
+ * - Sunday (ئێکشەمبی) & Monday (دووشەمبی): Evening (نیڤڕۆ)
+ * - Tuesday (سێشەمبی), Wednesday (چوارشەمبی), Thursday (پێنچ شەمبی): Morning (سپێدە)
+ */
 export const INITIAL_SCHEDULE: WeekSchedule = {
   'ئێکشەمبی': { 
     dayName: 'ئێکشەمبی', 
-    shift: 'morning', 
-    slots: generateSlotsForDay('morning', ['10 - ب', '10 - د', 'بێ وانە', '10 - هـ', 'بێ وانە', '10 - و']) 
+    shift: 'evening', 
+    slots: generateSlotsForDay('evening', ['10 - ب', '10 - د', 'بێ وانە', '10 - هـ', 'بێ وانە', '10 - و']) 
   },
   'دووشەمبی': { 
     dayName: 'دووشەمبی', 
-    shift: 'morning', 
-    slots: generateSlotsForDay('morning', ['10 - ج', 'بێ وانە', '10 - و', 'بێ وانە', '10 - هـ', '10 - ب']) 
+    shift: 'evening', 
+    slots: generateSlotsForDay('evening', ['10 - ج', 'بێ وانە', '10 - و', 'بێ وانە', '10 - هـ', '10 - ب']) 
   },
   'سێشەمبی': { 
     dayName: 'سێشەمبی', 
@@ -119,12 +137,12 @@ export const INITIAL_SCHEDULE: WeekSchedule = {
   },
   'چوارشەمبی': { 
     dayName: 'چوارشەمبی', 
-    shift: 'evening', 
-    slots: generateSlotsForDay('evening', ['10 - د', 'بێ وانە', 'بێ وانە', '10 - ج', '10 - ب', '10 - هـ']) 
+    shift: 'morning', 
+    slots: generateSlotsForDay('morning', ['10 - د', 'بێ وانە', 'بێ وانە', '10 - ج', '10 - ب', '10 - هـ']) 
   },
   'پێنچ شەمبی': { 
     dayName: 'پێنچ شەمبی', 
-    shift: 'evening', 
-    slots: generateSlotsForDay('evening', ['10 - ج', '10 - ب', 'بێ وانە', 'بێ وانە', '10 - و', '10 - د']) 
+    shift: 'morning', 
+    slots: generateSlotsForDay('morning', ['10 - ج', '10 - ب', 'بێ وانە', 'بێ وانە', '10 - و', '10 - د']) 
   },
 };

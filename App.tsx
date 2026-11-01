@@ -12,7 +12,12 @@ import {
   DEFAULT_ALARM_SETTINGS,
   ALARM_SOUNDS, 
   THEMES, 
-  ShiftType 
+  ShiftType,
+  STANDARD_SECTIONS,
+  ALL_KURDISH_SECTIONS,
+  getActiveSections,
+  generateClassList,
+  DEFAULT_DAY_SHIFTS
 } from './types';
 import { INITIAL_SCHEDULE, VOICE_SCRIPTS, calculateSlotTimes, generateSlotsForDay } from './constants';
 
@@ -266,14 +271,18 @@ const callClientGeminiTts = async (apiKeyToUse: string, textStr: string, voiceGe
   }
   throw lastErr || new Error("دروستکردنی دەنگ سەرکەوتوو نەبوو");
 };
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, doc } from 'firebase/firestore';
 import { 
   db, 
   TIMETABLES_COLLECTION, 
   fetchTimetablesFromFirestore, 
   saveTimetableToFirestore, 
   batchSaveTimetablesToFirestore, 
-  deleteTimetableFromFirestore 
+  deleteTimetableFromFirestore,
+  SCHOOL_SETTINGS_COLLECTION,
+  SETTINGS_GLOBAL_DOC,
+  saveSchoolSettingsToFirestore,
+  fetchSchoolSettingsFromFirestore
 } from './firebase';
 import { TeacherTimetableDoc, SwapSuggestion } from './types';
 
@@ -641,8 +650,27 @@ const App: React.FC = () => {
   const [wakeLock, setWakeLock] = useState<any>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
-  // Alarm & Timing Settings
-  const [alarmSettings, setAlarmSettings] = useState<AlarmSettings>(DEFAULT_ALARM_SETTINGS);
+  // Alarm & Timing Settings (Syncs with Firebase Firestore School Master Settings)
+  const [alarmSettings, setAlarmSettings] = useState<AlarmSettings>(() => {
+    try {
+      const saved = localStorage.getItem('alarm_settings_v10');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          return {
+            ...DEFAULT_ALARM_SETTINGS,
+            ...parsed,
+            dayShifts: { ...DEFAULT_DAY_SHIFTS, ...(parsed.dayShifts || {}) },
+            examSettings: { ...DEFAULT_ALARM_SETTINGS.examSettings, ...(parsed.examSettings || {}) }
+          };
+        }
+      }
+    } catch (e) {}
+    return DEFAULT_ALARM_SETTINGS;
+  });
+
+  const [adminSavingSettings, setAdminSavingSettings] = useState<boolean>(false);
+  const [adminSettingsSuccessMsg, setAdminSettingsSuccessMsg] = useState<string | null>(null);
 
   // Lockscreen Wallpaper Generator State
   const [showWallpaperModal, setShowWallpaperModal] = useState(false);
@@ -701,7 +729,7 @@ const App: React.FC = () => {
   const [adminBatchLoading, setAdminBatchLoading] = useState<boolean>(false);
   const [adminSuccessMsg, setAdminSuccessMsg] = useState<string | null>(null);
   const [adminCodeInput, setAdminCodeInput] = useState<string>('');
-  const [adminImportTab, setAdminImportTab] = useState<'code' | 'file' | 'edit'>('edit');
+  const [adminImportTab, setAdminImportTab] = useState<'code' | 'file' | 'edit' | 'timings'>('edit');
 
   // Admin Direct Timetable Editor State
   const [adminEditingTeacher, setAdminEditingTeacher] = useState<TeacherTimetableDoc | null>(null);
@@ -792,6 +820,64 @@ const App: React.FC = () => {
     }
     return () => { if (unsub) unsub(); };
   }, []);
+
+  // 3. Real-time Master School Settings Firestore Sync (Broadcast to Everyone)
+  useEffect(() => {
+    let unsubSettings: (() => void) | null = null;
+    try {
+      const settingsDocRef = doc(db, SCHOOL_SETTINGS_COLLECTION, SETTINGS_GLOBAL_DOC);
+      unsubSettings = onSnapshot(settingsDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const remoteData = docSnap.data() as Partial<AlarmSettings>;
+          if (remoteData && typeof remoteData === 'object') {
+            setAlarmSettings((prev) => {
+              const merged: AlarmSettings = {
+                ...prev,
+                ...remoteData,
+                dayShifts: { ...DEFAULT_DAY_SHIFTS, ...(remoteData.dayShifts || prev.dayShifts || {}) },
+                examSettings: {
+                  ...prev.examSettings,
+                  ...(remoteData.examSettings || {})
+                }
+              };
+              try {
+                localStorage.setItem('alarm_settings_v10', JSON.stringify(merged));
+                saveBackupData('alarm_settings_v10', merged);
+              } catch (e) {}
+              return merged;
+            });
+          }
+        }
+      }, (err) => {
+        console.warn("School settings Firestore listener (offline fallback):", err);
+      });
+    } catch (e) {
+      console.warn("Settings listener error:", e);
+    }
+    return () => { if (unsubSettings) unsubSettings(); };
+  }, []);
+
+  const handleAdminSaveMasterSettings = async (overrideSettings?: AlarmSettings) => {
+    const targetToSave = overrideSettings || alarmSettings;
+    setAdminSavingSettings(true);
+    setAdminSettingsSuccessMsg(null);
+    try {
+      await saveSchoolSettingsToFirestore(targetToSave);
+      setAlarmSettings(targetToSave);
+      try {
+        localStorage.setItem('alarm_settings_v10', JSON.stringify(targetToSave));
+        saveBackupData('alarm_settings_v10', targetToSave);
+      } catch (e) {}
+      applySettingsToSchedule(targetToSave);
+      setAdminSettingsSuccessMsg("✅ وەختێت دەوامێ، خولەکێن وانان، جەرەس و انتیحانێ ب سەرکەفتیانە د داتابەیسدا هاتنە پاشکەفتن و بۆ هەموو مامۆستا و قوتابیان بەڵاڤبوون!");
+      setTimeout(() => setAdminSettingsSuccessMsg(null), 6000);
+    } catch (err: any) {
+      alert("خەلەتی لە پاشکەفتنی وەختەکان: " + err.message);
+    } finally {
+      setAdminSavingSettings(false);
+    }
+  };
+
 
   // Sync selected teacher profile from allTeachersList
   useEffect(() => {
@@ -1618,12 +1704,13 @@ const App: React.FC = () => {
 
       Object.keys(prev).forEach((dayKey) => {
         const dayData = prev[dayKey];
-        const times = calculateSlotTimes(dayData.shift, newSettings);
+        const targetShift = (newSettings.dayShifts && newSettings.dayShifts[dayKey]) ? newSettings.dayShifts[dayKey] : dayData.shift;
+        const times = calculateSlotTimes(targetShift, newSettings);
         const existingSlots = dayData.slots || [];
         const newSlots: LessonSlot[] = [];
 
         for (let i = 0; i < count; i++) {
-          const t = times[i] || { start: "08:00", end: "08:40", isExam: false };
+          const t = times[i] || { start: "08:00", end: "08:35", isExam: false };
           const existing = existingSlots[i];
           newSlots.push({
             id: existing ? existing.id : `slot_${dayKey}_${i}_${Math.random().toString(36).substring(2, 6)}`,
@@ -1638,6 +1725,7 @@ const App: React.FC = () => {
 
         updated[dayKey] = {
           ...dayData,
+          shift: targetShift,
           slots: newSlots,
         };
       });
@@ -4807,6 +4895,47 @@ const App: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Kurdish Alphabet Expansion for all grades */}
+                  <div className="p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-3xl border-2 border-indigo-200 shadow-xs space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-indigo-600 text-white rounded-2xl shadow-sm">
+                          <Layers className="w-5 h-5 text-yellow-300" />
+                        </div>
+                        <div>
+                          <h4 className="font-black text-xs text-indigo-950">هەموو پیتێن ئەلفوبێیا کوردی بۆ هەمی قۆناغان (10، 11، 12)</h4>
+                          <p className="text-[11px] text-indigo-700">بە دیفۆڵت هۆبەکان تا پیتێ (ز) بەردەستن. بە چالاککردنی، هەموو 34 پیتە کوردییەکان بەردەست دەبن.</p>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={alarmSettings.allKurdishLettersEnabled || false}
+                          onChange={(e) => {
+                            const updated: AlarmSettings = {
+                              ...alarmSettings,
+                              allKurdishLettersEnabled: e.target.checked
+                            };
+                            setAlarmSettings(updated);
+                            try {
+                              localStorage.setItem('alarm_settings_v10', JSON.stringify(updated));
+                              saveBackupData('alarm_settings_v10', updated);
+                            } catch (err) {}
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                      </label>
+                    </div>
+                    <div className="flex flex-wrap gap-1 p-2.5 bg-white/80 rounded-2xl border border-indigo-100 max-h-24 overflow-y-auto no-scrollbar">
+                      {(alarmSettings.allKurdishLettersEnabled ? ALL_KURDISH_SECTIONS : STANDARD_SECTIONS).map(s => (
+                        <span key={s} className="px-2 py-0.5 bg-indigo-100 text-indigo-900 text-[11px] font-black rounded-lg">
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
                   {/* Actions */}
                   <div className="space-y-2">
                     <button
@@ -5012,7 +5141,7 @@ const App: React.FC = () => {
                     className="w-full p-2 bg-white border border-slate-200 rounded-xl outline-none font-bold text-slate-700"
                   >
                     <option value="all">هەموو هۆبەکان (All Sections)</option>
-                    {['أ', 'ب', 'ج', 'د', 'هـ', 'و', 'ز', 'ح', 'ط', 'ی'].map(sec => (
+                    {getActiveSections(alarmSettings.allKurdishLettersEnabled).map(sec => (
                       <option key={sec} value={sec}>هۆبەیا ({sec})</option>
                     ))}
                   </select>
@@ -5193,7 +5322,7 @@ const App: React.FC = () => {
                       className="w-full p-2.5 bg-white border border-purple-200 rounded-xl font-bold outline-none focus:border-purple-600 text-purple-900"
                     >
                       <option value="auto">✨ ئۆتۆماتیکی (نەفسی هۆبەیا وانەیێ خۆ)</option>
-                      {['أ', 'ب', 'ج', 'د', 'هـ', 'و', 'ز', 'ح', 'ط', 'ی'].map(sec => (
+                      {getActiveSections(alarmSettings.allKurdishLettersEnabled).map(sec => (
                         <option key={sec} value={sec}>هۆبەیا ({sec})</option>
                       ))}
                     </select>
@@ -5377,21 +5506,28 @@ const App: React.FC = () => {
                       className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 ${adminImportTab === 'edit' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-200'}`}
                     >
                       <Edit3 className="w-4 h-4 text-yellow-300" />
-                      <span>1. تەعدیل و دەستکاریکرن ب 1-کلیک (Interactive Editor)</span>
+                      <span>١. دەستکاریکرنی جەتوەلا مامۆستایان (1-Click)</span>
+                    </button>
+                    <button
+                      onClick={() => setAdminImportTab('timings')}
+                      className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 ${adminImportTab === 'timings' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-200'}`}
+                    >
+                      <Clock className="w-4 h-4 text-yellow-300" />
+                      <span>٢. وەختێت دەوامێ، جەرەس و انتیحانێ (Master Settings)</span>
                     </button>
                     <button
                       onClick={() => setAdminImportTab('code')}
                       className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 ${adminImportTab === 'code' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-200'}`}
                     >
                       <FileJson className="w-4 h-4" />
-                      <span>2. داخلکردنی فایلی کۆد / JSON</span>
+                      <span>٣. داخلکردنی فایلی کۆد / JSON</span>
                     </button>
                     <button
                       onClick={() => setAdminImportTab('file')}
                       className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 ${adminImportTab === 'file' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-200'}`}
                     >
                       <Upload className="w-4 h-4" />
-                      <span>3. بارکردنی فایلی PDF / وێنە (Gemini OCR)</span>
+                      <span>٤. بارکردنی فایلی PDF / وێنە</span>
                     </button>
                   </div>
 
@@ -5527,11 +5663,12 @@ const App: React.FC = () => {
                                       </td>
                                       {Array.from({ length: 6 }).map((_, slotIdx) => {
                                         const currentVal = slots[slotIdx]?.className || 'بێ وانە';
+                                        const activeSecs = getActiveSections(alarmSettings.allKurdishLettersEnabled);
                                         const standardOptions = [
                                           "بێ وانە",
-                                          "10 - أ", "10 - ب", "10 - ج", "10 - د", "10 - هـ", "10 - و",
-                                          "11 - أ", "11 - ب", "11 - ج", "11 - د", "11 - هـ", "11 - و",
-                                          "12 - أ", "12 - ب", "12 - ج", "12 - د", "12 - هـ", "12 - و"
+                                          ...activeSecs.map(s => `10 - ${s}`),
+                                          ...activeSecs.map(s => `11 - ${s}`),
+                                          ...activeSecs.map(s => `12 - ${s}`)
                                         ];
 
                                         return (
@@ -5595,6 +5732,392 @@ const App: React.FC = () => {
                           </div>
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {/* TAB 2: MASTER SCHOOL TIMINGS, EXAMS, BELLS & SHIFTS (SYNC TO EVERYONE) */}
+                  {adminImportTab === 'timings' && (
+                    <div className="space-y-6 animate-in fade-in duration-200">
+                      {/* Top Info Banner */}
+                      <div className="p-4 bg-gradient-to-r from-indigo-900 via-purple-900 to-slate-900 text-white rounded-3xl shadow-md flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="p-3 bg-yellow-400 text-slate-950 rounded-2xl shadow-sm">
+                            <Clock className="w-6 h-6" />
+                          </div>
+                          <div>
+                            <h4 className="font-black text-sm text-yellow-300">وەختێت دەوامێ، جەرەس، انتیحان و شێوازێ ڕۆژان</h4>
+                            <p className="text-xs text-indigo-200">هەمی گوهۆڕین د داتابەیسدا خەزن دبن و دەستبەجێ نک هەمی مامۆستا و قوتابیان بەڵاڤ دبن (Real-time Broadcast)</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {adminSettingsSuccessMsg && (
+                        <div className="p-4 rounded-2xl bg-emerald-50 border-2 border-emerald-300 text-emerald-900 text-xs font-black flex items-center gap-2">
+                          <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                          <span>{adminSettingsSuccessMsg}</span>
+                        </div>
+                      )}
+
+                      {/* SECTION 1: WEEKLY SHIFTS (ئێکشەمبی و دووشەمبی نیڤڕۆ، سێشەمبی، چوارشەمبی، پێنچ شەمبی سپێدە) */}
+                      <div className="p-5 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-4">
+                        <div className="flex items-center justify-between border-b pb-3">
+                          <div className="flex items-center gap-2">
+                            <Calendar className="w-5 h-5 text-indigo-600" />
+                            <h4 className="font-black text-sm text-slate-800">شێوازێ دەواما ڕۆژێن هەفتێ (Weekly Shifts)</h4>
+                          </div>
+                          <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+                            کلیک ل هەر ڕۆژەکێ بکە بۆ گۆڕین
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-slate-600 font-medium">
+                          📌 <strong>ڕێسایێ دیارکری:</strong> ئێکشەمبی و دووشەمبی دەواما نیڤڕۆیە، سێشەمبی و چوارشەمبی و پێنچ شەمبی دەواما سپێدێیە. دەتوانیت بە یەک کلیک شێوازەکەیان بگۆڕیت:
+                        </p>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
+                          {DAYS.map((dayName) => {
+                            const currentShift = alarmSettings.dayShifts?.[dayName] || (dayName === 'ئێکشەمبی' || dayName === 'دووشەمبی' ? 'evening' : 'morning');
+                            const isMorning = currentShift === 'morning';
+
+                            return (
+                              <button
+                                key={dayName}
+                                type="button"
+                                onClick={() => {
+                                  const newShifts = {
+                                    ...(alarmSettings.dayShifts || DEFAULT_DAY_SHIFTS),
+                                    [dayName]: (isMorning ? 'evening' : 'morning') as ShiftType
+                                  };
+                                  setAlarmSettings((prev) => ({ ...prev, dayShifts: newShifts }));
+                                }}
+                                className={`p-3.5 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-1.5 text-center active:scale-95 ${
+                                  isMorning
+                                    ? 'bg-amber-50/80 border-amber-300 text-amber-900 shadow-xs'
+                                    : 'bg-indigo-50/80 border-indigo-300 text-indigo-900 shadow-xs'
+                                }`}
+                              >
+                                <span className="font-black text-xs">{dayName}</span>
+                                <span className={`text-[11px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1 ${
+                                  isMorning ? 'bg-amber-200 text-amber-950' : 'bg-indigo-200 text-indigo-950'
+                                }`}>
+                                  {isMorning ? <Sun className="w-3 h-3 text-amber-600" /> : <Moon className="w-3 h-3 text-indigo-600" />}
+                                  {isMorning ? 'سپێدە (Morning)' : 'نیڤڕۆ (Evening)'}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* SECTION 2: SHIFT TIMINGS & LESSON DURATIONS */}
+                      <div className="p-5 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-4">
+                        <div className="flex items-center gap-2 border-b pb-3">
+                          <Clock className="w-5 h-5 text-indigo-600" />
+                          <h4 className="font-black text-sm text-slate-800">وەختێ دەستپێکا دەوامێ و دەقێن وانان</h4>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {/* Morning Shift */}
+                          <div className="p-4 bg-amber-50/60 rounded-2xl border border-amber-200 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="font-black text-xs text-amber-950 flex items-center gap-1.5">
+                                <Sun className="w-4 h-4 text-amber-600" /> دەواما سپێدێ:
+                              </span>
+                              <span className="text-xs font-mono font-bold text-amber-800">{alarmSettings.morningStartTime || "08:00"}</span>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-bold text-slate-600 block">وەختێ دەستپێکا دەوامی:</label>
+                              <input
+                                type="time"
+                                value={alarmSettings.morningStartTime || "08:00"}
+                                onChange={(e) => setAlarmSettings((prev) => ({ ...prev, morningStartTime: e.target.value }))}
+                                className="w-full p-2.5 bg-white border border-amber-300 rounded-xl font-mono text-xs font-bold outline-none"
+                              />
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-bold text-slate-600 block">ماوەیا هەر وانەیەکێ (خولەک):</label>
+                              <div className="grid grid-cols-4 gap-1.5">
+                                {[30, 35, 40, 45].map((m) => (
+                                  <button
+                                    key={m}
+                                    type="button"
+                                    onClick={() => setAlarmSettings((prev) => ({ ...prev, morningDuration: m }))}
+                                    className={`py-2 rounded-xl text-xs font-black border transition-all ${
+                                      alarmSettings.morningDuration === m
+                                        ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                                        : 'bg-white text-slate-700 border-slate-200 hover:bg-amber-100/50'
+                                    }`}
+                                  >
+                                    {m} خ
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Evening Shift */}
+                          <div className="p-4 bg-indigo-50/60 rounded-2xl border border-indigo-200 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="font-black text-xs text-indigo-950 flex items-center gap-1.5">
+                                <Moon className="w-4 h-4 text-indigo-600" /> دەواما نیڤڕۆ / ئێڤاری:
+                              </span>
+                              <span className="text-xs font-mono font-bold text-indigo-800">{alarmSettings.eveningStartTime || "12:30"}</span>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-bold text-slate-600 block">وەختێ دەستپێکا دەوامی:</label>
+                              <input
+                                type="time"
+                                value={alarmSettings.eveningStartTime || "12:30"}
+                                onChange={(e) => setAlarmSettings((prev) => ({ ...prev, eveningStartTime: e.target.value }))}
+                                className="w-full p-2.5 bg-white border border-indigo-300 rounded-xl font-mono text-xs font-bold outline-none"
+                              />
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-bold text-slate-600 block">ماوەیا هەر وانەیەکێ (خولەک):</label>
+                              <div className="grid grid-cols-4 gap-1.5">
+                                {[30, 35, 40, 45].map((m) => (
+                                  <button
+                                    key={m}
+                                    type="button"
+                                    onClick={() => setAlarmSettings((prev) => ({ ...prev, eveningDuration: m }))}
+                                    className={`py-2 rounded-xl text-xs font-black border transition-all ${
+                                      alarmSettings.eveningDuration === m
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                        : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-100/50'
+                                    }`}
+                                  >
+                                    {m} خ
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Lessons Count per Day */}
+                        <div className="flex flex-col sm:flex-row items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-200 gap-2">
+                          <span className="text-xs font-black text-slate-700">ژمارەی گشتی وانەکان لە ڕۆژێکدا:</span>
+                          <div className="flex gap-2">
+                            {[5, 6, 7, 8].map((c) => (
+                              <button
+                                key={c}
+                                type="button"
+                                onClick={() => setAlarmSettings((prev) => ({ ...prev, lessonCount: c }))}
+                                className={`px-4 py-1.5 rounded-xl text-xs font-black border transition-all ${
+                                  (alarmSettings.lessonCount || 6) === c
+                                    ? 'bg-slate-900 text-white border-slate-900'
+                                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                                }`}
+                              >
+                                {c} دەرس
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* SECTION 3: EXAM SCHEDULE RULES (یاسایێن انتیحانێ) */}
+                      <div className="p-5 bg-gradient-to-r from-purple-50/80 to-indigo-50/80 rounded-3xl border-2 border-purple-200 shadow-xs space-y-4">
+                        <div className="flex items-center justify-between border-b border-purple-200 pb-3">
+                          <div className="flex items-center gap-2">
+                            <div className="p-2 bg-purple-600 text-white rounded-xl">
+                              <GraduationCap className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <h4 className="font-black text-sm text-purple-950">خشتەیێ ئەزموونان / انتیحانێ (Exam Schedule Rules)</h4>
+                              <p className="text-[11px] text-purple-700">دەرس 35/30 خولەک، پاش دەرسا 1 انتیحان 40 خولەک، دیڤدا دەرسا 2 دەست پێ دکەت</p>
+                            </div>
+                          </div>
+
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={alarmSettings.examSettings?.enabled || false}
+                              onChange={(e) => {
+                                setAlarmSettings((prev) => ({
+                                  ...prev,
+                                  examSettings: {
+                                    ...prev.examSettings,
+                                    enabled: e.target.checked
+                                  }
+                                }));
+                              }}
+                              className="sr-only peer"
+                            />
+                            <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                          </label>
+                        </div>
+
+                        {/* Explanatory Rule Callout */}
+                        <div className="p-4 bg-white/90 rounded-2xl border border-purple-200 text-xs text-purple-950 leading-relaxed font-medium">
+                          📌 <strong>یاسایێ ڕەسمیێ انتیحانێ:</strong>
+                          <ul className="list-disc list-inside mt-1.5 space-y-1 text-slate-700">
+                            <li><strong>دەواما سپێدێ:</strong> هەموو وانە 35 خولەکن. دەرسا 1 خلاس دەبێت، ڕاستەوخۆ دیڤدا انتیحان (40 خولەک) ئەنجام دەدرێت، پاشان دەرسا 2 دەست پێ دەکات.</li>
+                            <li><strong>دەواما نیڤڕۆ:</strong> هەموو وانە 30 خولەکن. دەرسا 1 خلاس دەبێت، ڕاستەوخۆ دیڤدا انتیحان (40 خولەک) ئەنجام دەدرێت، پاشان دەرسا 2 دەست پێ دەکات.</li>
+                          </ul>
+                        </div>
+
+                        {/* Exam Custom Controls */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                          <div>
+                            <label className="text-[11px] font-black text-purple-900 block mb-1">وانا سپێدێ (خولەک):</label>
+                            <input
+                              type="number"
+                              value={alarmSettings.examSettings?.morningLessonDuration || 35}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value) || 35;
+                                setAlarmSettings((prev) => ({
+                                  ...prev,
+                                  examSettings: { ...prev.examSettings, morningLessonDuration: val }
+                                }));
+                              }}
+                              className="w-full p-2.5 bg-white border border-purple-300 rounded-xl font-bold text-xs outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-black text-purple-900 block mb-1">وانا نیڤڕۆ (خولەک):</label>
+                            <input
+                              type="number"
+                              value={alarmSettings.examSettings?.eveningLessonDuration || 30}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value) || 30;
+                                setAlarmSettings((prev) => ({
+                                  ...prev,
+                                  examSettings: { ...prev.examSettings, eveningLessonDuration: val }
+                                }));
+                              }}
+                              className="w-full p-2.5 bg-white border border-purple-300 rounded-xl font-bold text-xs outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-black text-purple-900 block mb-1">ماوەیا انتیحانێ (خولەک):</label>
+                            <input
+                              type="number"
+                              value={alarmSettings.examSettings?.examDuration || 40}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value) || 40;
+                                setAlarmSettings((prev) => ({
+                                  ...prev,
+                                  examSettings: { ...prev.examSettings, examDuration: val }
+                                }));
+                              }}
+                              className="w-full p-2.5 bg-white border border-purple-300 rounded-xl font-bold text-xs outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-black text-purple-900 block mb-1">فرسەت پشتی انتیحانێ:</label>
+                            <input
+                              type="number"
+                              value={alarmSettings.examSettings?.breakAfterExam || 10}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value) || 10;
+                                setAlarmSettings((prev) => ({
+                                  ...prev,
+                                  examSettings: { ...prev.examSettings, breakAfterExam: val }
+                                }));
+                              }}
+                              className="w-full p-2.5 bg-white border border-purple-300 rounded-xl font-bold text-xs outline-none"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* SECTION 4: BREAKS & BELLS */}
+                      <div className="p-5 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-4">
+                        <div className="flex items-center gap-2 border-b pb-3">
+                          <Bell className="w-5 h-5 text-indigo-600" />
+                          <h4 className="font-black text-sm text-slate-800">فرسەت، جەرەس و بێهنڤەدان</h4>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div>
+                            <label className="text-[11px] font-bold text-slate-600 block mb-1">جەرەسێ ئاسایی بەینا وانان:</label>
+                            <select
+                              value={alarmSettings.defaultBreakDuration || 5}
+                              onChange={(e) => setAlarmSettings((prev) => ({ ...prev, defaultBreakDuration: parseInt(e.target.value) }))}
+                              className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-xs outline-none"
+                            >
+                              <option value={3}>3 خولەک</option>
+                              <option value={5}>5 خولەک (ئاسایی)</option>
+                              <option value={7}>7 خولەک</option>
+                              <option value={10}>10 خولەک</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-slate-600 block mb-1">فرسەتا مەزن:</label>
+                            <select
+                              value={alarmSettings.longBreakDuration || 10}
+                              onChange={(e) => setAlarmSettings((prev) => ({ ...prev, longBreakDuration: parseInt(e.target.value) }))}
+                              className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-xs outline-none"
+                            >
+                              <option value={10}>10 خولەک</option>
+                              <option value={15}>15 خولەک</option>
+                              <option value={20}>20 خولەک</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-bold text-slate-600 block mb-1">فرسەتا مەزن پشتی چ وانەیەکێ:</label>
+                            <select
+                              value={alarmSettings.longBreakLesson || 3}
+                              onChange={(e) => setAlarmSettings((prev) => ({ ...prev, longBreakLesson: parseInt(e.target.value) }))}
+                              className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-xs outline-none"
+                            >
+                              <option value={2}>پشتی وانا 2</option>
+                              <option value={3}>پشتی وانا 3</option>
+                              <option value={4}>پشتی وانا 4</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* SECTION 5: ALL KURDISH LETTERS TOGGLE */}
+                      <div className="p-5 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2.5 bg-indigo-600 text-white rounded-2xl shadow-sm">
+                              <Layers className="w-5 h-5 text-yellow-300" />
+                            </div>
+                            <div>
+                              <h4 className="font-black text-xs text-indigo-950">هەموو پیتێن ئەلفوبێیا کوردی بۆ هەمی قۆناغان (10، 11، 12)</h4>
+                              <p className="text-[11px] text-slate-500">بە دیفۆڵت تا هۆبەی (ز) بەردەستە. بە چالاککردن هەموو 34 پیتەکان بەردەست دەبن.</p>
+                            </div>
+                          </div>
+
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={alarmSettings.allKurdishLettersEnabled || false}
+                              onChange={(e) => {
+                                setAlarmSettings((prev) => ({ ...prev, allKurdishLettersEnabled: e.target.checked }));
+                              }}
+                              className="sr-only peer"
+                            />
+                            <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* MASTER SAVE & BROADCAST BUTTON */}
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={() => handleAdminSaveMasterSettings()}
+                          disabled={adminSavingSettings}
+                          className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-black text-sm shadow-xl flex items-center justify-center gap-3 transition-all disabled:opacity-50"
+                        >
+                          {adminSavingSettings ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5 text-yellow-300" />}
+                          <span>💾 پاشکەفتن و بەڵاڤکرن بۆ هەموویان د Firebase دا (Save & Broadcast)</span>
+                        </button>
+                      </div>
                     </div>
                   )}
 

@@ -21,10 +21,12 @@ export type WeekSchedule = Record<string, DaySchedule>;
 
 export interface ExamSettings {
   enabled: boolean;
-  examLessonNumber: number; // e.g. 2
-  examDuration: number;     // e.g. 40
-  otherLessonsDuration: number; // e.g. 35
-  breakAfterExam: number;   // e.g. 10
+  examLessonNumber: number; // e.g. 1 (starts right after lesson 1)
+  examDuration: number;     // e.g. 40 mins
+  otherLessonsDuration: number; // fallback e.g. 35
+  morningLessonDuration?: number; // 35 mins for morning shift
+  eveningLessonDuration?: number; // 30 mins for evening shift
+  breakAfterExam: number;   // e.g. 10 mins
 }
 
 export interface AlarmSettings {
@@ -37,16 +39,26 @@ export interface AlarmSettings {
   triggerOnEnd: boolean;
   enabled: boolean;
   repeatCount: number;
-  morningDuration: number; // Duration for morning shift (e.g. 40)
-  eveningDuration: number; // Duration for evening shift (e.g. 35)
+  morningDuration: number; // Duration for morning shift (e.g. 35 or 40)
+  eveningDuration: number; // Duration for evening shift (e.g. 30 or 35)
   morningStartTime: string; // e.g. "08:00"
-  eveningStartTime: string; // e.g. "13:00"
+  eveningStartTime: string; // e.g. "12:30" or "13:00"
   lessonCount: number;      // e.g. 6 or 7
   defaultBreakDuration: number; // e.g. 5 mins
   longBreakLesson: number;  // e.g. 3 (after lesson 3)
   longBreakDuration: number; // e.g. 10 or 15 mins
+  allKurdishLettersEnabled?: boolean; // If enabled, includes all Kurdish alphabet letters A-Z for all grades
+  dayShifts?: Record<string, ShiftType>; // Sunday & Monday: evening; Tue, Wed, Thu: morning
   examSettings: ExamSettings;
 }
+
+export const DEFAULT_DAY_SHIFTS: Record<string, ShiftType> = {
+  'ئێکشەمبی': 'evening', // نیڤڕۆ
+  'دووشەمبی': 'evening', // نیڤڕۆ
+  'سێشەمبی': 'morning', // سپێدە
+  'چوارشەمبی': 'morning', // سپێدە
+  'پێنچ شەمبی': 'morning'  // سپێدە
+};
 
 export const DEFAULT_ALARM_SETTINGS: AlarmSettings = {
   useUniversalSound: false,
@@ -58,19 +70,23 @@ export const DEFAULT_ALARM_SETTINGS: AlarmSettings = {
   triggerOnEnd: true,
   enabled: true,
   repeatCount: 3,
-  morningDuration: 40,
-  eveningDuration: 35,
+  morningDuration: 35,
+  eveningDuration: 30,
   morningStartTime: "08:00",
-  eveningStartTime: "13:00",
+  eveningStartTime: "12:30",
   lessonCount: 6,
   defaultBreakDuration: 5,
   longBreakLesson: 3,
   longBreakDuration: 10,
+  allKurdishLettersEnabled: false,
+  dayShifts: { ...DEFAULT_DAY_SHIFTS },
   examSettings: {
     enabled: false,
-    examLessonNumber: 2,
+    examLessonNumber: 1,
     examDuration: 40,
     otherLessonsDuration: 35,
+    morningLessonDuration: 35,
+    eveningLessonDuration: 30,
     breakAfterExam: 10
   }
 };
@@ -83,8 +99,24 @@ export const GRADES = [
   'پۆلا 12 - زانستی', 'پۆلا 12 - وێژەیی'
 ];
 
-// All Sections / Hubas (هۆبە/پۆل)
-export const SECTIONS = ['أ', 'ب', 'ج', 'د', 'هـ', 'و', 'ز', 'ح', 'ط', 'ی', 'ک', 'ل', 'م', 'ن'];
+// Standard Sections up to 'ز' by default
+export const STANDARD_SECTIONS = ['أ', 'ب', 'ج', 'د', 'هـ', 'و', 'ز'];
+
+// Full Kurdish Alphabet Sections (کاتێک لە ڕێکخستنەکان چالاک دەکرێت)
+export const ALL_KURDISH_SECTIONS = [
+  'ئـ', 'ا', 'أ', 'ب', 'پ', 'ت', 'ج', 'چ', 'ح', 'خ', 
+  'د', 'ر', 'ڕ', 'ز', 'ژ', 'س', 'ش', 'ص', 'ض', 'ط', 
+  'ظ', 'ع', 'غ', 'ف', 'ڤ', 'ق', 'ک', 'گ', 'ل', 'ڵ', 
+  'م', 'ن', 'هـ', 'و', 'ۆ', 'ی', 'ێ'
+];
+
+// Backward-compatible export: defaults to up to 'ز'
+export const SECTIONS = STANDARD_SECTIONS;
+
+// Helper to get active sections based on Kurdish alphabet setting
+export const getActiveSections = (enableAllKurdish: boolean = false): string[] => {
+  return enableAllKurdish ? ALL_KURDISH_SECTIONS : STANDARD_SECTIONS;
+};
 
 // All Kurdish School Subjects (بابەت)
 export const ALL_SUBJECTS = [
@@ -111,23 +143,37 @@ export const ALL_SUBJECTS = [
   'بێ وانە'
 ];
 
-export const CLASSES = [
-  '10 - ب', '10 - ج', '10 - د', '10 - هـ', '10 - و',
-  'پۆلا 1 - أ', 'پۆلا 1 - ب', 'پۆلا 1 - ج',
-  'پۆلا 2 - أ', 'پۆلا 2 - ب', 'پۆلا 2 - ج',
-  'پۆلا 3 - أ', 'پۆلا 3 - ب', 'پۆلا 3 - ج',
-  'پۆلا 4 - أ', 'پۆلا 4 - ب', 'پۆلا 4 - ج',
-  'پۆلا 5 - أ', 'پۆلا 5 - ب', 'پۆلا 5 - ج',
-  'پۆلا 6 - أ', 'پۆلا 6 - ب', 'پۆلا 6 - ج',
-  'پۆلا 7 - أ', 'پۆلا 7 - ب', 'پۆلا 7 - ج',
-  'پۆلا 8 - أ', 'پۆلا 8 - ب', 'پۆلا 8 - ج',
-  'پۆلا 9 - أ', 'پۆلا 9 - ب', 'پۆلا 9 - ج',
-  'پۆلا 10 - أ', 'پۆلا 10 - ب', 'پۆلا 10 - ج', 'پۆلا 10 - د', 'پۆلا 10 - هـ', 'پۆلا 10 - و',
-  'پۆلا 11 - زانستی أ', 'پۆلا 11 - زانستی ب', 'پۆلا 11 - وێژەیی أ',
-  'پۆلا 12 - زانستی أ', 'پۆلا 12 - زانستی ب', 'پۆلا 12 - وێژەیی أ',
-  'ب', 'ج', 'د', 'هـ', 'و',
-  'بێ وانە'
-];
+// Generate Classes for Grades 10, 11, 12 up to 'ز' (and support all Kurdish letters)
+export const generateClassList = (enableAllKurdish: boolean = false): string[] => {
+  const secs = enableAllKurdish ? ALL_KURDISH_SECTIONS : STANDARD_SECTIONS;
+  const list: string[] = ['بێ وانە'];
+
+  // High school Grade 10 (دەهـ)
+  secs.forEach(s => list.push(`10 - ${s}`));
+  secs.forEach(s => list.push(`پۆلا 10 - ${s}`));
+
+  // High school Grade 11 (یازدە)
+  secs.forEach(s => list.push(`11 - ${s}`));
+  secs.forEach(s => list.push(`پۆلا 11 - زانستی ${s}`));
+  secs.forEach(s => list.push(`پۆلا 11 - وێژەیی ${s}`));
+
+  // High school Grade 12 (دوازدە)
+  secs.forEach(s => list.push(`12 - ${s}`));
+  secs.forEach(s => list.push(`پۆلا 12 - زانستی ${s}`));
+  secs.forEach(s => list.push(`پۆلا 12 - وێژەیی ${s}`));
+
+  // Basic schools 1 to 9
+  for (let g = 1; g <= 9; g++) {
+    secs.slice(0, 4).forEach(s => list.push(`پۆلا ${g} - ${s}`));
+  }
+
+  // Bare letters
+  secs.forEach(s => list.push(s));
+
+  return Array.from(new Set(list));
+};
+
+export const CLASSES = generateClassList(false);
 
 export const DAYS = ['ئێکشەمبی', 'دووشەمبی', 'سێشەمبی', 'چوارشەمبی', 'پێنچ شەمبی'];
 

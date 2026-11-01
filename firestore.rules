@@ -18,5 +18,11 @@ service cloud.firestore {
       allow read: if true;
       allow write: if true;
     }
+
+    // Master School Settings & Timings Sync
+    match /school_settings/{settingsId} {
+      allow read: if true;
+      allow write: if true;
+    }
   }
 }
