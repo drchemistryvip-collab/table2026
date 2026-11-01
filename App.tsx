@@ -903,7 +903,9 @@ const App: React.FC = () => {
 
   // Admin Management & Mass Import/Export State
   const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
-  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(false);
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(() => {
+    return localStorage.getItem('is_admin_logged_in') === 'true';
+  });
   const [adminPinInput, setAdminPinInput] = useState<string>('');
   const [adminPinError, setAdminPinError] = useState<string | null>(null);
   const [adminBatchPreview, setAdminBatchPreview] = useState<TeacherTimetableDoc[]>([]);
@@ -1008,11 +1010,47 @@ const App: React.FC = () => {
   useEffect(() => {
     const scrubbedName = 'مامۆستایێ هێژا';
     const scrubbedScript = "مامۆستایێ هێژا دەرس دەست پێ دکەت - هیڤیدارم بچنە پۆلێ دگەل رێزو سلاڤان";
+    let changed = false;
+
+    const scrubText = (t: string) => {
+      if (!t) return t;
+      return t.replace(/ماموستا حسێنێ بەرێز/g, "مامۆستایێ هێژا")
+              .replace(/مامۆستا حسێن/g, "مامۆستایێ هێژا")
+              .replace(/ماموستا حوسێن/g, "مامۆستایێ هێژا")
+              .replace(/حسێنێ بەرێز/g, "مامۆستایێ هێژا")
+              .replace(/حسێن/g, "مامۆستایێ هێژا")
+              .replace(/حوسێن/g, "مامۆستایێ هێژا")
+              .replace(/Hussein/gi, "مامۆستایێ هێژا");
+    };
 
     if (teacherName.includes('حسێن') || teacherName.includes('حوسێن') || teacherName.toLowerCase().includes('hussein')) {
-      setTeacherName(scrubbedName);
-      localStorage.setItem('teacher_name', scrubbedName);
-      saveBackupData('teacher_name', scrubbedName);
+      const scrubbed = scrubText(teacherName);
+      setTeacherName(scrubbed);
+      localStorage.setItem('teacher_name', scrubbed);
+      saveBackupData('teacher_name', scrubbed);
+      changed = true;
+    }
+
+    const scrubScripts = (scripts: Record<string, string>) => {
+      const newScripts = { ...scripts };
+      let scriptChanged = false;
+      Object.keys(newScripts).forEach(key => {
+        const original = newScripts[key];
+        const scrubbed = scrubText(original);
+        if (original !== scrubbed) {
+          newScripts[key] = scrubbed;
+          scriptChanged = true;
+        }
+      });
+      return scriptChanged ? newScripts : null;
+    };
+
+    const newCustomScripts = scrubScripts(customScripts);
+    if (newCustomScripts) {
+      setCustomScripts(newCustomScripts);
+      localStorage.setItem('custom_scripts_v6', JSON.stringify(newCustomScripts));
+      saveBackupData('custom_scripts_v6', newCustomScripts);
+      changed = true;
     }
 
     if (alarmSettings.universalScript && (alarmSettings.universalScript.includes('حسێن') || alarmSettings.universalScript.includes('حوسێن') || alarmSettings.universalScript.toLowerCase().includes('hussein'))) {
@@ -1020,10 +1058,23 @@ const App: React.FC = () => {
         const updated = { ...prev, universalScript: scrubbedScript };
         localStorage.setItem('alarm_settings_v10', JSON.stringify(updated));
         saveBackupData('alarm_settings_v10', updated);
+        if (isAdminLoggedIn) saveSchoolSettingsToFirestore(updated);
         return updated;
       });
+      changed = true;
     }
-  }, [teacherName, alarmSettings.universalScript]);
+
+    if (changed && isAdminLoggedIn) {
+      // Sync scrubbed data to firestore if admin
+      const syncScrub = async () => {
+        await saveSchoolSettingsToFirestore({ 
+          ...alarmSettings, 
+          universalScript: scrubbedScript 
+        });
+      };
+      syncScrub();
+    }
+  }, [teacherName, alarmSettings.universalScript, customScripts, isAdminLoggedIn]);
 
   // 1.5 Auto-Reconcile Cached Timetables with current day shifts and lesson timings
   useEffect(() => {
@@ -1272,6 +1323,19 @@ const App: React.FC = () => {
       alert(`داخوازییا مامۆستا [${req.teacherName}] هاتە ڕەتکرن.`);
     } catch (err: any) {
       alert("خەلەتی: " + err.message);
+    } finally {
+      setRequestActionLoadingId(null);
+    }
+  };
+
+  // Admin Delete Processed Request
+  const handleAdminDeleteChangeRequest = async (reqId: string) => {
+    if (!confirm("تکایە پشتڕاستکەرەوە کە دەتەوێت ئەم داخوازییە بسڕیتەوە؟")) return;
+    setRequestActionLoadingId(reqId);
+    try {
+      await deleteScheduleChangeRequest(reqId);
+    } catch (err: any) {
+      alert("خەلەتی لە سڕینەوەی داخوازی: " + err.message);
     } finally {
       setRequestActionLoadingId(null);
     }
@@ -1999,14 +2063,37 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    requestWakeLock();
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') requestWakeLock();
+    let heartbeatInterval: any = null;
+    const playHeartbeat = () => {
+      if (audioContextRef.current && audioContextRef.current.state === 'running') {
+        const osc = audioContextRef.current.createOscillator();
+        const gain = audioContextRef.current.createGain();
+        gain.gain.value = 0.0001; // Extremely quiet
+        osc.connect(gain);
+        gain.connect(audioContextRef.current.destination);
+        osc.start();
+        osc.stop(audioContextRef.current.currentTime + 0.1);
+      }
     };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        // App backgrounded: start heartbeat every 15s to prevent throttling
+        heartbeatInterval = setInterval(playHeartbeat, 15000);
+      } else {
+        if (heartbeatInterval) clearInterval(heartbeatInterval);
+        if (document.visibilityState === 'visible') requestWakeLock();
+      }
+    };
+    
+    requestWakeLock();
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (wakeLock) wakeLock.release();
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      if (wakeLock) {
+        try { wakeLock.release(); } catch(e) {}
+      }
     };
   }, []);
 
@@ -2342,7 +2429,7 @@ const App: React.FC = () => {
 
   const initAudioContext = () => {
     if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
     }
     if (audioContextRef.current.state === 'suspended') {
       audioContextRef.current.resume();
@@ -2397,7 +2484,7 @@ const App: React.FC = () => {
           .catch(() => {
             if (shouldStopRef.current) return resolve();
             const dataInt16 = new Int16Array(bytes.buffer);
-            const buffer = audioContextRef.current!.createBuffer(1, dataInt16.length, 24000);
+            const buffer = audioContextRef.current!.createBuffer(1, dataInt16.length, audioContextRef.current!.sampleRate);
             const channelData = buffer.getChannelData(0);
             for (let i = 0; i < dataInt16.length; i++) channelData[i] = dataInt16[i] / 32768.0;
             const source = audioContextRef.current!.createBufferSource();
@@ -3305,6 +3392,9 @@ const App: React.FC = () => {
       try {
         localStorage.setItem('alarm_settings_v10', JSON.stringify(newSettings));
         saveBackupData('alarm_settings_v10', newSettings);
+        if (isAdminLoggedIn) {
+          saveSchoolSettingsToFirestore(newSettings);
+        }
       } catch (e) {}
       return newSettings;
     });
@@ -5593,7 +5683,7 @@ const App: React.FC = () => {
                       <Mic className="w-4 h-4" /> دەنگ و پەیامێن زەنگێ (Gemini TTS):
                     </label>
                     <div className="space-y-2">
-                      {Object.entries(customScripts).slice(0, 7).map(([key, text]) => (
+                      {Object.entries(customScripts).map(([key, text]) => (
                         <div
                           key={key}
                           className={`p-3.5 rounded-2xl border transition-all ${
@@ -6286,6 +6376,7 @@ const App: React.FC = () => {
                   onClick={() => {
                     if (adminPinInput === '2026' || adminPinInput === 'admin') {
                       setIsAdminLoggedIn(true);
+                      localStorage.setItem('is_admin_logged_in', 'true');
                       setAdminPinError(null);
                     } else {
                       setAdminPinError("کۆدی ئەدمین خەلەتە!");
@@ -7056,8 +7147,8 @@ const App: React.FC = () => {
                                       </div>
                                     </div>
 
-                                    {/* Status Badge */}
-                                    <div>
+                                    {/* Status Badge & Delete */}
+                                    <div className="flex items-center gap-2">
                                       {req.status === 'pending' && (
                                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 border border-amber-300 text-amber-900 text-xs font-black animate-pulse">
                                           <Clock className="w-3.5 h-3.5 text-amber-600" />
@@ -7075,6 +7166,18 @@ const App: React.FC = () => {
                                           <X className="w-3.5 h-3.5 text-rose-600" />
                                           ڕەتکرایەوە
                                         </span>
+                                      )}
+
+                                      {/* Delete button for non-pending */}
+                                      {req.status !== 'pending' && (
+                                        <button
+                                          onClick={() => handleAdminDeleteChangeRequest(req.id)}
+                                          disabled={isLoading}
+                                          className="p-1.5 rounded-lg bg-slate-100 text-slate-400 hover:bg-rose-100 hover:text-rose-600 transition-all active:scale-95 disabled:opacity-50"
+                                          title="سڕینەوەی ئەم داخوازییە"
+                                        >
+                                          {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                                        </button>
                                       )}
                                     </div>
                                   </div>
