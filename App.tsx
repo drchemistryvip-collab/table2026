@@ -1035,12 +1035,18 @@ const App: React.FC = () => {
 
     const scrubText = (t: string) => {
       if (!t) return t;
-      // Regex to catch Hussein variants (حسێن, حسین, حوسێن, Hussein) in different contexts
-      const husseinRegex = /مامۆستا\s+حسێن|ماموستا\s+حسێن|ماموستا\s+حسین|مامۆستا\s+حسین|ماموستا\s+حوسێن|مامۆستا\s+حوسێن|حسێنێ\s+بەرێز|حسێن|حسین|حوسێن|Hussein/gi;
-      return t.replace(husseinRegex, "مامۆستایێ هێژا");
+      return t.replace(/ماموستا حسێنێ بەرێز/g, "مامۆستایێ هێژا")
+              .replace(/مامۆستا حسێن/g, "مامۆستایێ هێژا")
+              .replace(/ماموستا حوسێن/g, "مامۆستایێ هێژا")
+              .replace(/مامۆستا حسین/g, "مامۆستایێ هێژا")
+              .replace(/حسێنێ بەرێز/g, "مامۆستایێ هێژا")
+              .replace(/حسێن/g, "مامۆستایێ هێژا")
+              .replace(/حسین/g, "مامۆستایێ هێژا")
+              .replace(/حوسێن/g, "مامۆستایێ هێژا")
+              .replace(/Hussein/gi, "مامۆستایێ هێژا");
     };
 
-    if (teacherName && (teacherName.includes('حسێن') || teacherName.includes('حسین') || teacherName.includes('حوسێن') || teacherName.toLowerCase().includes('hussein'))) {
+    if (teacherName.includes('حسێن') || teacherName.includes('حسین') || teacherName.includes('حوسێن') || teacherName.toLowerCase().includes('hussein')) {
       const scrubbed = scrubText(teacherName);
       setTeacherName(scrubbed);
       localStorage.setItem('teacher_name', scrubbed);
@@ -2545,7 +2551,6 @@ const App: React.FC = () => {
         await Notification.requestPermission();
       }
       // 2. Audio Context (Resume)
-      initAudioContext();
       if (audioContextRef.current) {
         if (audioContextRef.current.state === 'suspended') {
           await audioContextRef.current.resume();
@@ -2564,16 +2569,12 @@ const App: React.FC = () => {
           setWakeLock(lock);
         } catch (err) {}
       }
-
-      // 4. Force Live Mode
-      setViewMode('live');
       
       localStorage.setItem('perm_onboarding_v1', 'true');
       setShowPermissionModal(false);
     } catch (err) {
       console.warn("Permission grant error:", err);
       setShowPermissionModal(false);
-      localStorage.setItem('perm_onboarding_v1', 'true');
     }
   };
 
@@ -4060,9 +4061,9 @@ const App: React.FC = () => {
 
       {/* Compact Floating Widget Mode Overlay (Hides main application) */}
       {compactWidgetMode && (
-        <div className="fixed inset-0 z-[150] bg-slate-950 flex flex-col items-center justify-center p-6 text-white text-center space-y-6 animate-in fade-in duration-500">
-          <div className="p-8 bg-slate-900 border border-slate-800 rounded-[3rem] shadow-[0_0_100px_rgba(0,0,0,0.5)] max-w-md w-full space-y-6">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+        <div className="fixed inset-0 z-[150] bg-black flex flex-col items-center justify-center p-6 text-white text-center space-y-6 animate-in fade-in duration-300">
+          <div className="p-6 bg-slate-950 border-2 border-slate-800 rounded-[2.5rem] shadow-2xl max-w-md w-full space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <span className="flex items-center gap-2 text-slate-500 text-xs font-black">
                 <span className="w-2.5 h-2.5 rounded-full bg-slate-800 animate-pulse" />
                 🔒 مۆدا حەشارتنێ (Stealth Mode / Hidden)
@@ -7397,11 +7398,11 @@ const App: React.FC = () => {
                                       <button
                                         onClick={() => handleAdminDeleteChangeRequest(req.id)}
                                         disabled={isLoading}
-                                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-600 text-white hover:bg-rose-700 transition-all active:scale-95 disabled:opacity-50 border border-rose-500 shadow-md"
+                                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 transition-all active:scale-95 disabled:opacity-50 border border-rose-100"
                                         title="سڕینەوەی ئەم داخوازییە"
                                       >
-                                        {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                                        <span className="text-xs font-black">سڕینەوە</span>
+                                        {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                                        <span className="text-[10px] font-black">سڕینەوە</span>
                                       </button>
                                     </div>
                                   </div>
@@ -8456,7 +8457,7 @@ const App: React.FC = () => {
                   📌 داخوازییا دەستکاریا خشتەیێ تە ڕەوانەی ئەدمین کراوە (چاوەڕوانی پەسەندکردنە):
                 </span>
                 <span className="text-[11px] text-amber-800 font-medium">
-                  خشتەکەت لەسەر ئەم ئامێرە ١٠٠٪ ئۆفلاین کاردەکات و دەستکارییەکانت ماونەتەوە. کاتێک ئەدمین پەسەندی بکات، دێ ل جەتوەلا تە و بۆ هەموو قوتابیان بەڵاڤ بیت.
+                  خشتەکەت لەسەر ئەم ئامێرە ١٠٠٪ ئۆفلاین کاردەکات و دەستکارییەکانت ماونەتەوە. کاتێک ئەدمین پەسەندی بکات، ل جەتوەلا تە بەڵاڤ دەبێت.
                 </span>
               </div>
             </div>
