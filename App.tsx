@@ -693,7 +693,7 @@ const App: React.FC = () => {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [settingsActiveTab, setSettingsActiveTab] = useState<'timing' | 'exam' | 'ai' | 'voice' | 'storage' | 'general'>('timing');
   const [activeAlarm, setActiveAlarm] = useState<{ title: string; msg: string } | null>(null);
-  const [viewMode, setViewMode] = useState<'modern' | 'classic' | 'live'>('modern');
+  const [viewMode, setViewMode] = useState<'modern' | 'classic' | 'live'>('live');
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [readyVoices, setReadyVoices] = useState<string[]>([]);
   const [voiceGender, setVoiceGender] = useState<'male' | 'female'>('male');
@@ -728,6 +728,9 @@ const App: React.FC = () => {
   const [isStandalone, setIsStandalone] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [showInstallGuideModal, setShowInstallGuideModal] = useState(false);
+  const [showPermissionModal, setShowPermissionModal] = useState(() => {
+    return !localStorage.getItem('perm_onboarding_v1');
+  });
 
   // Custom Gemini API Key State
   const [userApiKey, setUserApiKey] = useState<string>(() => localStorage.getItem('user_gemini_api_key') || '');
@@ -833,7 +836,7 @@ const App: React.FC = () => {
             mergedShifts['چوارشەمبی'] = 'morning';
             mergedShifts['پێنچ شەمبی'] = 'morning';
           }
-          const scriptStr = parsed.universalScript && (parsed.universalScript.includes('حسێن') || parsed.universalScript.includes('حوسێن'))
+          const scriptStr = parsed.universalScript && (parsed.universalScript.includes('حسێن') || parsed.universalScript.includes('حسین') || parsed.universalScript.includes('حوسێن'))
             ? "مامۆستایێ هێژا دەرس دەست پێ دکەت - هیڤیدارم بچنە پۆلێ دگەل رێزو سلاڤان"
             : (parsed.universalScript || DEFAULT_ALARM_SETTINGS.universalScript);
           return {
@@ -850,13 +853,31 @@ const App: React.FC = () => {
     return DEFAULT_ALARM_SETTINGS;
   });
 
+  // Lockscreen / MediaSession Metadata Sync
+  useEffect(() => {
+    if ('mediaSession' in navigator && currentLiveSlot.slot) {
+      const slot = currentLiveSlot.slot;
+      try {
+        (navigator as any).mediaSession.metadata = new MediaMetadata({
+          title: `وانا نوکە: ${slot.className} (${slot.startTime}-${slot.endTime})`,
+          artist: `م. ${teacherName} - ${teacherSubject}`,
+          album: `خشتەیێ وانان - جەتوەلا من`,
+          artwork: [
+            { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+            { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+          ]
+        });
+      } catch (err) {}
+    }
+  }, [currentLiveSlot, teacherName, teacherSubject]);
+
   const [adminSavingSettings, setAdminSavingSettings] = useState<boolean>(false);
   const [adminSettingsSuccessMsg, setAdminSettingsSuccessMsg] = useState<string | null>(null);
 
   // Lockscreen Wallpaper Generator State
   const [showWallpaperModal, setShowWallpaperModal] = useState(false);
   const [wallpaperTheme, setWallpaperTheme] = useState<'indigo' | 'amoled' | 'emerald' | 'amber' | 'white'>('indigo');
-  const [wallpaperMode, setWallpaperMode] = useState<'full' | 'today'>('full');
+  const [wallpaperMode, setWallpaperMode] = useState<'full' | 'today' | 'table'>('full');
   const [wallpaperTopY, setWallpaperTopY] = useState<number>(380);
   const [wallpaperScale, setWallpaperScale] = useState<number>(1.0);
   const [wallpaperSpacing, setWallpaperSpacing] = useState<number>(20);
@@ -953,7 +974,7 @@ const App: React.FC = () => {
         }
         const osc = audioContextRef.current.createOscillator();
         const gain = audioContextRef.current.createGain();
-        gain.gain.value = 0.01;
+        gain.gain.value = 0.0001; // Extremely low gain to avoid hiss while keeping context alive
         osc.connect(gain);
         gain.connect(audioContextRef.current.destination);
         osc.start();
@@ -1014,16 +1035,12 @@ const App: React.FC = () => {
 
     const scrubText = (t: string) => {
       if (!t) return t;
-      return t.replace(/ماموستا حسێنێ بەرێز/g, "مامۆستایێ هێژا")
-              .replace(/مامۆستا حسێن/g, "مامۆستایێ هێژا")
-              .replace(/ماموستا حوسێن/g, "مامۆستایێ هێژا")
-              .replace(/حسێنێ بەرێز/g, "مامۆستایێ هێژا")
-              .replace(/حسێن/g, "مامۆستایێ هێژا")
-              .replace(/حوسێن/g, "مامۆستایێ هێژا")
-              .replace(/Hussein/gi, "مامۆستایێ هێژا");
+      // Regex to catch Hussein variants (حسێن, حسین, حوسێن, Hussein) in different contexts
+      const husseinRegex = /مامۆستا\s+حسێن|ماموستا\s+حسێن|ماموستا\s+حسین|مامۆستا\s+حسین|ماموستا\s+حوسێن|مامۆستا\s+حوسێن|حسێنێ\s+بەرێز|حسێن|حسین|حوسێن|Hussein/gi;
+      return t.replace(husseinRegex, "مامۆستایێ هێژا");
     };
 
-    if (teacherName.includes('حسێن') || teacherName.includes('حوسێن') || teacherName.toLowerCase().includes('hussein')) {
+    if (teacherName && (teacherName.includes('حسێن') || teacherName.includes('حسین') || teacherName.includes('حوسێن') || teacherName.toLowerCase().includes('hussein'))) {
       const scrubbed = scrubText(teacherName);
       setTeacherName(scrubbed);
       localStorage.setItem('teacher_name', scrubbed);
@@ -1053,14 +1070,43 @@ const App: React.FC = () => {
       changed = true;
     }
 
-    if (alarmSettings.universalScript && (alarmSettings.universalScript.includes('حسێن') || alarmSettings.universalScript.includes('حوسێن') || alarmSettings.universalScript.toLowerCase().includes('hussein'))) {
+    if (alarmSettings.universalScript && (alarmSettings.universalScript.includes('حسێن') || alarmSettings.universalScript.includes('حسین') || alarmSettings.universalScript.includes('حوسێن') || alarmSettings.universalScript.toLowerCase().includes('hussein'))) {
+      const scrubbed = scrubText(alarmSettings.universalScript);
       setAlarmSettings(prev => {
-        const updated = { ...prev, universalScript: scrubbedScript };
+        const updated = { ...prev, universalScript: scrubbed };
         localStorage.setItem('alarm_settings_v10', JSON.stringify(updated));
         saveBackupData('alarm_settings_v10', updated);
         if (isAdminLoggedIn) saveSchoolSettingsToFirestore(updated);
         return updated;
       });
+      changed = true;
+    }
+
+    // Scrub all schedule slots
+    const scrubSchedule = (sched: WeekSchedule) => {
+      let schedChanged = false;
+      const newSched = { ...sched };
+      DAYS.forEach(day => {
+        if (newSched[day] && Array.isArray(newSched[day].slots)) {
+          newSched[day].slots = newSched[day].slots.map(slot => {
+            const scrubbedClass = scrubText(slot.className);
+            const scrubbedSubject = scrubText(slot.subject);
+            if (slot.className !== scrubbedClass || slot.subject !== scrubbedSubject) {
+              schedChanged = true;
+              return { ...slot, className: scrubbedClass, subject: scrubbedSubject };
+            }
+            return slot;
+          });
+        }
+      });
+      return { newSched, schedChanged };
+    };
+
+    const { newSched, schedChanged } = scrubSchedule(schedule);
+    if (schedChanged) {
+      setSchedule(newSched);
+      localStorage.setItem('timetable_data', JSON.stringify(newSched));
+      saveBackupData('timetable_data', newSched);
       changed = true;
     }
 
@@ -1157,15 +1203,26 @@ const App: React.FC = () => {
           const remoteData = docSnap.data() as Partial<AlarmSettings>;
           if (remoteData && typeof remoteData === 'object') {
             setAlarmSettings((prev) => {
+              // 1. Identify if we should respect teacher-specific overrides
+              const activeDoc = allTeachersList.find(t => t.id === selectedTeacherId || t.teacherName === selectedTeacherId);
+              const teacherOverrides = activeDoc?.alarmSettings || {};
+
+              // 2. Merge logic: Global Defaults < Teacher Overrides < Local State (if any)
               const merged: AlarmSettings = {
                 ...prev,
                 ...remoteData,
+                ...teacherOverrides,
                 customSections: remoteData.customSections || prev.customSections || STANDARD_SECTIONS,
                 customSectionsCount: remoteData.customSectionsCount || prev.customSectionsCount || 7,
-                dayShifts: { ...DEFAULT_DAY_SHIFTS, ...(remoteData.dayShifts || prev.dayShifts || {}) },
+                dayShifts: { 
+                  ...DEFAULT_DAY_SHIFTS, 
+                  ...(remoteData.dayShifts || {}),
+                  ...(teacherOverrides.dayShifts || {})
+                },
                 examSettings: {
                   ...prev.examSettings,
-                  ...(remoteData.examSettings || {})
+                  ...(remoteData.examSettings || {}),
+                  ...(teacherOverrides.examSettings || {})
                 }
               };
               try {
@@ -1183,7 +1240,7 @@ const App: React.FC = () => {
       console.warn("Settings listener error:", e);
     }
     return () => { if (unsubSettings) unsubSettings(); };
-  }, []);
+  }, [allTeachersList, selectedTeacherId]);
 
   // 4. Real-time Teacher Schedule Change Requests Listener (For Admin Review & Sync)
   useEffect(() => {
@@ -1258,6 +1315,7 @@ const App: React.FC = () => {
       teacherName: teacherName,
       subject: teacherSubject,
       requestedSchedule: updatedSchedule,
+      requestedSettings: alarmSettings,
       previousSchedule: officialSchedule,
       changesSummary,
       status: 'pending',
@@ -1282,6 +1340,7 @@ const App: React.FC = () => {
         teacherName: req.teacherName,
         subject: req.subject,
         schedule: req.requestedSchedule,
+        alarmSettings: req.requestedSettings,
         updatedAt: new Date().toISOString()
       });
 
@@ -1290,7 +1349,12 @@ const App: React.FC = () => {
       setAllTeachersList((prev) => {
         const updated = prev.map(t => {
           if (t.id === req.teacherId || t.teacherName === req.teacherName) {
-            return { ...t, schedule: req.requestedSchedule, updatedAt: new Date().toISOString() };
+            return { 
+              ...t, 
+              schedule: req.requestedSchedule, 
+              alarmSettings: req.requestedSettings, 
+              updatedAt: new Date().toISOString() 
+            };
           }
           return t;
         });
@@ -1307,7 +1371,7 @@ const App: React.FC = () => {
         saveBackupData('timetable_data', req.requestedSchedule);
       }
 
-      alert(`🎉 داخوازییا مامۆستا [${req.teacherName}] ب سەرکەفتیانە هاتە قبوولکرن و ل هەموو مۆبایل و قوتابخانێ بەڵاڤ بوو!`);
+      alert(`🎉 داخوازییا مامۆستا [${req.teacherName}] ب سەرکەفتیانە هاتە قبوولکرن و ل جەتوەلا وی هاتە بەڵاڤکرن!`);
     } catch (err: any) {
       alert("خەلەتی لە پەسەندکردندا: " + err.message);
     } finally {
@@ -1368,34 +1432,53 @@ const App: React.FC = () => {
     if (allTeachersList.length > 0 && selectedTeacherId) {
       const activeDoc = allTeachersList.find(t => t.id === selectedTeacherId || t.teacherName === selectedTeacherId);
       if (activeDoc) {
-        const reconciledSched = reconcileScheduleWithDayShifts(activeDoc.schedule, alarmSettings);
+        const targetSettings = activeDoc.alarmSettings 
+          ? { ...alarmSettings, ...activeDoc.alarmSettings } 
+          : alarmSettings;
+
+        const reconciledSched = reconcileScheduleWithDayShifts(activeDoc.schedule, targetSettings);
         setTeacherName(activeDoc.teacherName);
         setTeacherSubject(activeDoc.subject || 'کیمیا');
         setSchedule(reconciledSched);
+        setAlarmSettings(targetSettings);
+
         localStorage.setItem('timetable_data', JSON.stringify(reconciledSched));
         localStorage.setItem('teacher_name', activeDoc.teacherName);
         localStorage.setItem('teacher_subject', activeDoc.subject || 'کیمیا');
+        localStorage.setItem('alarm_settings_v10', JSON.stringify(targetSettings));
+
         saveBackupData('timetable_data', reconciledSched);
         saveBackupData('teacher_name', activeDoc.teacherName);
         saveBackupData('teacher_subject', activeDoc.subject || 'کیمیا');
+        saveBackupData('alarm_settings_v10', targetSettings);
       }
     }
-  }, [allTeachersList, selectedTeacherId, alarmSettings.dayShifts]);
+  }, [allTeachersList, selectedTeacherId]);
 
   const selectTeacherProfile = (teacherDoc: TeacherTimetableDoc) => {
-    const reconciledSched = reconcileScheduleWithDayShifts(teacherDoc.schedule, alarmSettings);
+    const targetSettings = teacherDoc.alarmSettings 
+      ? { ...alarmSettings, ...teacherDoc.alarmSettings } 
+      : alarmSettings;
+
+    const reconciledSched = reconcileScheduleWithDayShifts(teacherDoc.schedule, targetSettings);
     setSelectedTeacherId(teacherDoc.id);
     setTeacherName(teacherDoc.teacherName);
     setTeacherSubject(teacherDoc.subject || 'کیمیا');
     setSchedule(reconciledSched);
+    setAlarmSettings(targetSettings);
+
     localStorage.setItem('selected_teacher_id', teacherDoc.id);
     localStorage.setItem('teacher_name', teacherDoc.teacherName);
     localStorage.setItem('teacher_subject', teacherDoc.subject || 'کیمیا');
     localStorage.setItem('timetable_data', JSON.stringify(reconciledSched));
+    localStorage.setItem('alarm_settings_v10', JSON.stringify(targetSettings));
+
     saveBackupData('selected_teacher_id', teacherDoc.id);
     saveBackupData('teacher_name', teacherDoc.teacherName);
     saveBackupData('teacher_subject', teacherDoc.subject || 'کیمیا');
     saveBackupData('timetable_data', reconciledSched);
+    saveBackupData('alarm_settings_v10', targetSettings);
+    
     setShowTeacherSelectModal(false);
   };
 
@@ -2385,9 +2468,8 @@ const App: React.FC = () => {
           }
         }
 
-        if (savedView === 'modern' || savedView === 'classic' || savedView === 'live') {
-          setViewMode(savedView as any);
-        }
+        // Always default to live mode on startup as requested by user
+        setViewMode('live');
         if (savedGender === 'male' || savedGender === 'female') {
           setVoiceGender(savedGender);
         }
@@ -2456,6 +2538,45 @@ const App: React.FC = () => {
     setActiveAlarm(null);
   };
 
+  const handleGrantPermissions = async () => {
+    try {
+      // 1. Notifications
+      if ('Notification' in window) {
+        await Notification.requestPermission();
+      }
+      // 2. Audio Context (Resume)
+      initAudioContext();
+      if (audioContextRef.current) {
+        if (audioContextRef.current.state === 'suspended') {
+          await audioContextRef.current.resume();
+        }
+      } else {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          audioContextRef.current = new AudioCtx();
+        }
+      }
+      
+      // 3. Wake Lock
+      if ('wakeLock' in navigator) {
+        try {
+          const lock = await (navigator as any).wakeLock.request('screen');
+          setWakeLock(lock);
+        } catch (err) {}
+      }
+
+      // 4. Force Live Mode
+      setViewMode('live');
+      
+      localStorage.setItem('perm_onboarding_v1', 'true');
+      setShowPermissionModal(false);
+    } catch (err) {
+      console.warn("Permission grant error:", err);
+      setShowPermissionModal(false);
+      localStorage.setItem('perm_onboarding_v1', 'true');
+    }
+  };
+
   const playOfflineVoice = async (id: string, repeats: number = 1) => {
     initAudioContext();
     if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
@@ -2481,18 +2602,27 @@ const App: React.FC = () => {
             source.onended = () => resolve();
             source.start();
           })
-          .catch(() => {
+          .catch(async (err) => {
+            console.warn("decodeAudioData failed, trying fallback:", err);
             if (shouldStopRef.current) return resolve();
-            const dataInt16 = new Int16Array(bytes.buffer);
-            const buffer = audioContextRef.current!.createBuffer(1, dataInt16.length, audioContextRef.current!.sampleRate);
-            const channelData = buffer.getChannelData(0);
-            for (let i = 0; i < dataInt16.length; i++) channelData[i] = dataInt16[i] / 32768.0;
-            const source = audioContextRef.current!.createBufferSource();
-            source.buffer = buffer;
-            source.connect(audioContextRef.current!.destination);
-            currentSourceNodeRef.current = source;
-            source.onended = () => resolve();
-            source.start();
+            try {
+              // Create a temporary URL for the blob and play via HTMLAudioElement
+              const blob = new Blob([bytes], { type: 'audio/mpeg' });
+              const url = URL.createObjectURL(blob);
+              const audio = new Audio(url);
+              audio.onended = () => {
+                URL.revokeObjectURL(url);
+                resolve();
+              };
+              audio.onerror = () => {
+                URL.revokeObjectURL(url);
+                resolve();
+              };
+              await audio.play();
+            } catch (fallbackErr) {
+              console.error("Audio fallback failed:", fallbackErr);
+              resolve();
+            }
           });
       });
 
@@ -2617,8 +2747,14 @@ const App: React.FC = () => {
       }
     } else if (soundStyle === 'custom_url' && alarmSettings.soundUrl) {
       try {
-        const audio = new Audio(alarmSettings.soundUrl);
-        await audio.play();
+        if (alarmSettings.soundUrl.startsWith('indexeddb://')) {
+          const id = alarmSettings.soundUrl.replace('indexeddb://', '');
+          const played = await playOfflineVoice(id, 1);
+          if (!played) playSynthesizedSchoolBell(2);
+        } else {
+          const audio = new Audio(alarmSettings.soundUrl);
+          await audio.play();
+        }
       } catch (e) {
         playSynthesizedSchoolBell(2);
       }
@@ -2794,6 +2930,56 @@ const App: React.FC = () => {
         startY += cardH + wallpaperSpacing;
       });
 
+    } else if (wallpaperMode === 'table') {
+      // FULL GRID LAYOUT (TABLE STYLE)
+      const tableX = 60;
+      const tableY = wallpaperTopY;
+      const tableW = width - 120;
+      const dayH = 220;
+      const dayGap = 20;
+
+      DAYS.forEach((dayName, dIdx) => {
+        const ry = tableY + dIdx * (dayH + dayGap);
+        const dayData = schedule[dayName];
+        if (!dayData) return;
+
+        ctx.save();
+        drawRoundedRect(tableX, ry, tableW, dayH, 24, cardBg, cardBorder, 2);
+
+        // Day Name on the right (RTL)
+        ctx.textAlign = 'center';
+        ctx.font = '900 34px Vazirmatn, sans-serif';
+        ctx.fillStyle = accentColor;
+        ctx.fillText(dayName.split(' ')[0], tableX + tableW - 80, ry + dayH / 2 + 10);
+
+        const slots = dayData.slots || [];
+        const slotsCount = slots.length || 6;
+        const totalWForSlots = tableW - 160 - 40;
+        const sW = (totalWForSlots - 10 * (slotsCount - 1)) / slotsCount;
+
+        slots.forEach((slot, sIdx) => {
+          // RTL placement
+          const rtlIndex = slotsCount - 1 - sIdx;
+          const sx = tableX + 20 + rtlIndex * (sW + 10);
+          const sy = ry + 25;
+          const isEmpty = !slot.className || slot.className === 'بێ وانە';
+
+          drawRoundedRect(sx, sy, sW, dayH - 50, 18, isEmpty ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.05)', cardBorder, 1);
+
+          if (!isEmpty) {
+            ctx.textAlign = 'center';
+            ctx.font = '900 24px Vazirmatn, sans-serif';
+            ctx.fillStyle = textColor;
+            const shortClass = slot.className.replace('پۆلا ', '');
+            ctx.fillText(shortClass, sx + sW / 2, sy + dayH / 2 - 15);
+
+            ctx.font = '700 16px Vazirmatn, monospace';
+            ctx.fillStyle = accentColor;
+            ctx.fillText(slot.startTime, sx + sW / 2, sy + dayH - 75);
+          }
+        });
+        ctx.restore();
+      });
     } else {
       // Full Week View - Right To Left (RTL) Layout: Lesson 1 on far right, Lesson 6 on far left
       DAYS.forEach((dayName) => {
@@ -2873,10 +3059,26 @@ const App: React.FC = () => {
     }
   };
 
-  const downloadWallpaperImage = () => {
+  const downloadWallpaperImage = async () => {
     const canvas = wallpaperCanvasRef.current;
     if (!canvas) return;
     const url = canvas.toDataURL('image/png');
+    
+    if (isIOS && navigator.share) {
+      try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        const file = new File([blob], `jadwal_lockscreen_wallpaper_${wallpaperMode}_${wallpaperTheme}.png`, { type: 'image/png' });
+        await navigator.share({
+          files: [file],
+          title: 'Lockscreen Wallpaper',
+        });
+        return;
+      } catch (err) {
+        console.error("Share failed:", err);
+      }
+    }
+
     const a = document.createElement('a');
     a.href = url;
     a.download = `jadwal_lockscreen_wallpaper_${wallpaperMode}_${wallpaperTheme}.png`;
@@ -3230,10 +3432,26 @@ const App: React.FC = () => {
     }
   };
 
-  const downloadWidgetImage = () => {
+  const downloadWidgetImage = async () => {
     const canvas = widgetCanvasRef.current;
     if (!canvas) return;
     const url = canvas.toDataURL('image/png');
+
+    if (isIOS && navigator.share) {
+      try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        const file = new File([blob], `widget_${widgetStyle}_${widgetTheme}.png`, { type: 'image/png' });
+        await navigator.share({
+          files: [file],
+          title: 'Widget Image',
+        });
+        return;
+      } catch (err) {
+        console.error("Share failed:", err);
+      }
+    }
+
     const a = document.createElement('a');
     a.href = url;
     a.download = `widget_${widgetStyle}_${widgetTheme}.png`;
@@ -3551,7 +3769,7 @@ const App: React.FC = () => {
       if (useSample) {
         setAiImagePreview("/assets/aistudio/photo_2026-10-27_21-33-17_62edd79f.jpg");
         extractedDataResult = {
-          teacherName: "م حسێن",
+          teacherName: "مامۆستایێ هێژا",
           subject: "کیمیا",
           lessonCountPerDay: 6,
           days: [
@@ -3561,7 +3779,7 @@ const App: React.FC = () => {
             { dayName: "چوارشەمبی", shift: "morning", lessons: ["10 - د", "بێ وانە", "10 - ج", "10 - ب", "بێ وانە", "10 - هـ"] },
             { dayName: "پێنچ شەمبی", shift: "morning", lessons: ["10 - ج", "10 - ب", "بێ وانە", "بێ وانە", "10 - و", "10 - د"] }
           ],
-          notes: "خشتەیا ماموستا حسێن (کیمیا)"
+          notes: "خشتەیا مامۆستایێ هێژا (کیمیا)"
         };
       } else if (file) {
         base64Data = await new Promise<string>((resolve, reject) => {
@@ -3842,12 +4060,12 @@ const App: React.FC = () => {
 
       {/* Compact Floating Widget Mode Overlay (Hides main application) */}
       {compactWidgetMode && (
-        <div className="fixed inset-0 z-[150] bg-slate-950/95 backdrop-blur-3xl flex flex-col items-center justify-center p-6 text-white text-center space-y-6 animate-in fade-in duration-300">
-          <div className="p-6 bg-gradient-to-b from-indigo-950/90 to-slate-900/90 border-2 border-indigo-500/50 rounded-[2.5rem] shadow-2xl max-w-md w-full space-y-5 backdrop-blur-2xl">
-            <div className="flex items-center justify-between border-b border-indigo-800/80 pb-3">
-              <span className="flex items-center gap-2 text-yellow-300 text-xs font-black">
-                <span className="w-3.5 h-3.5 rounded-full bg-emerald-400 animate-ping" />
-                ⚡ مۆدا زیندی یا ویجێتێ شاشەی (Floating Live Widget)
+        <div className="fixed inset-0 z-[150] bg-slate-950 flex flex-col items-center justify-center p-6 text-white text-center space-y-6 animate-in fade-in duration-500">
+          <div className="p-8 bg-slate-900 border border-slate-800 rounded-[3rem] shadow-[0_0_100px_rgba(0,0,0,0.5)] max-w-md w-full space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <span className="flex items-center gap-2 text-slate-500 text-xs font-black">
+                <span className="w-2.5 h-2.5 rounded-full bg-slate-800 animate-pulse" />
+                🔒 مۆدا حەشارتنێ (Stealth Mode / Hidden)
               </span>
               <button
                 onClick={() => setCompactWidgetMode(false)}
@@ -4058,6 +4276,16 @@ const App: React.FC = () => {
                         }`}
                       >
                         خشتەیێ هەمی هەفتێ
+                      </button>
+                      <button
+                        onClick={() => setWallpaperMode('table')}
+                        className={`py-2 px-3 rounded-2xl text-xs font-black border transition-all ${
+                          wallpaperMode === 'table'
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        شێوازێ خشتەیێ گشتی
                       </button>
                       <button
                         onClick={() => setWallpaperMode('today')}
@@ -4370,6 +4598,11 @@ const App: React.FC = () => {
                   <Smartphone className="w-5 h-5 text-indigo-600" />
                   چەوان ویجێتی بێخەمە سەر شاشەیا مۆبایلێ (How to add Widget to Home Screen)?
                 </p>
+                {isIOS && (
+                  <div className="p-3 bg-blue-600 text-white rounded-xl text-[10px] font-black shadow-md border-2 border-white/20 animate-pulse">
+                    ⚠️ تێبینی بۆ ئایفۆن (iPhone): ویجێتێن فەرمی تەنێ بۆ ئەپێن Native نە. بۆ ئایفۆنێ، تکایە ڕێکا (HD PNG) بەکاربهێنە یان ئەپەکێ وەک Widgetsmith دا وێنەیێ ویجێتی بخەیە سەر شاشەی.
+                  </div>
+                )}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] text-slate-700 leading-relaxed font-medium">
                   <div className="p-3 bg-white rounded-xl border border-indigo-100 space-y-1">
                     <span className="font-extrabold text-indigo-900 block text-xs">📱 ڕێکا 1: بەشی Widgets یێ مۆبایلێ (PWA Native):</span>
@@ -5381,18 +5614,11 @@ const App: React.FC = () => {
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                const reader = new FileReader();
-                                reader.onload = (evt) => {
-                                  const dataUrl = evt.target?.result as string;
-                                  if (dataUrl) {
-                                    const updated = { ...alarmSettings, soundStyle: 'custom_url' as const, soundUrl: dataUrl };
-                                    setAlarmSettings(updated);
-                                    localStorage.setItem('alarm_settings_v10', JSON.stringify(updated));
-                                    saveBackupData('alarm_settings_v10', updated);
-                                    alert(`🎉 فایلی دەنگیی [${file.name}] لە مۆبایلەکەتدا ب سەرکەفتی دیاری بوو!`);
-                                  }
-                                };
-                                reader.readAsDataURL(file);
+                                handleFileUpload('custom_bell', file);
+                                const updated = { ...alarmSettings, soundStyle: 'custom_url' as const, soundUrl: 'indexeddb://custom_bell' };
+                                setAlarmSettings(updated);
+                                localStorage.setItem('alarm_settings_v10', JSON.stringify(updated));
+                                saveBackupData('alarm_settings_v10', updated);
                               }
                             }}
                           />
@@ -7168,17 +7394,15 @@ const App: React.FC = () => {
                                         </span>
                                       )}
 
-                                      {/* Delete button for non-pending */}
-                                      {req.status !== 'pending' && (
-                                        <button
-                                          onClick={() => handleAdminDeleteChangeRequest(req.id)}
-                                          disabled={isLoading}
-                                          className="p-1.5 rounded-lg bg-slate-100 text-slate-400 hover:bg-rose-100 hover:text-rose-600 transition-all active:scale-95 disabled:opacity-50"
-                                          title="سڕینەوەی ئەم داخوازییە"
-                                        >
-                                          {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                                        </button>
-                                      )}
+                                      <button
+                                        onClick={() => handleAdminDeleteChangeRequest(req.id)}
+                                        disabled={isLoading}
+                                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-600 text-white hover:bg-rose-700 transition-all active:scale-95 disabled:opacity-50 border border-rose-500 shadow-md"
+                                        title="سڕینەوەی ئەم داخوازییە"
+                                      >
+                                        {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                                        <span className="text-xs font-black">سڕینەوە</span>
+                                      </button>
                                     </div>
                                   </div>
 
@@ -8232,7 +8456,7 @@ const App: React.FC = () => {
                   📌 داخوازییا دەستکاریا خشتەیێ تە ڕەوانەی ئەدمین کراوە (چاوەڕوانی پەسەندکردنە):
                 </span>
                 <span className="text-[11px] text-amber-800 font-medium">
-                  خشتەکەت لەسەر ئەم ئامێرە ١٠٠٪ ئۆفلاین کاردەکات و دەستکارییەکانت ماونەتەوە. کاتێک ئەدمین پەسەندی بکات، ل هەموو جەتوەلان بەڵاڤ دەبێت.
+                  خشتەکەت لەسەر ئەم ئامێرە ١٠٠٪ ئۆفلاین کاردەکات و دەستکارییەکانت ماونەتەوە. کاتێک ئەدمین پەسەندی بکات، دێ ل جەتوەلا تە و بۆ هەموو قوتابیان بەڵاڤ بیت.
                 </span>
               </div>
             </div>
@@ -8979,6 +9203,76 @@ const App: React.FC = () => {
           <span className="text-[10px] font-black">مێنیو</span>
         </button>
       </footer>
+
+      {/* Initial Entry Permissions & Setup Modal */}
+      {showPermissionModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/90 backdrop-blur-xl p-4">
+          <div className="bg-white rounded-[2.5rem] p-8 max-w-md w-full shadow-2xl space-y-6 text-center animate-in zoom-in duration-300">
+            <div className="bg-indigo-100 text-indigo-600 w-24 h-24 rounded-full flex items-center justify-center mx-auto shadow-inner">
+              <ShieldCheck className="w-12 h-12" />
+            </div>
+            
+            <div className="space-y-2">
+              <h2 className="text-2xl font-black text-slate-800">بخێر هـاتی بۆ جەتوەلا من 👋</h2>
+              <p className="text-slate-600 font-bold text-sm leading-relaxed">
+                دا بەرنامە ب دروستی کار بکەت و جەرەس و ئاگەهداریا ل باکگراوەندی بدەت، تکایە ڕێپێدانێن خوارێ چالاک بکە:
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 text-right">
+                <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-sm">
+                  <BellRing className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-slate-800">ئاگەهداریا جەرەسی (Notifications)</h4>
+                  <p className="text-[10px] text-slate-500 font-bold">بو وێ یەکێ دەمێ دەرس دەستپێدکەت مۆبایل تە ئاگەهدار بکەت</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 text-right">
+                <div className="p-2.5 bg-emerald-600 text-white rounded-xl shadow-sm">
+                  <Volume2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-slate-800">دەنگێ ڕاستەوخۆ (Audio Context)</h4>
+                  <p className="text-[10px] text-slate-500 font-bold">چالاککرنا دەنگی دا مۆبایل ب ئاسایی دەنگێ وانان بخوینیت</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 text-right">
+                <div className="p-2.5 bg-amber-600 text-white rounded-xl shadow-sm">
+                  <MonitorPlay className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-slate-800">نەهـێلانا ڤەمراندنا بەرنامەی (Stay Active)</h4>
+                  <p className="text-[10px] text-slate-500 font-bold">دا شاشە نە هێتە ڤەمراندن و بەرنامە یێ کارا بیت د باکگراوەندی دا</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 text-right">
+                <div className="p-2.5 bg-rose-600 text-white rounded-xl shadow-sm">
+                  <FolderUp className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-slate-800">چالاککرنا فایلان (File Storage)</h4>
+                  <p className="text-[10px] text-slate-500 font-bold">بۆ بارکرنا دەنگێ جەرەسی و پاشکەفتکرنا وێنەیێن ویجێتی</p>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={handleGrantPermissions}
+              className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-black rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2"
+            >
+              <CheckCircle className="w-5 h-5" />
+              <span>هەمی ڕێپێدانان چالاک بکە و بەردەوام بە</span>
+            </button>
+            
+            <p className="text-[10px] text-slate-400 font-bold">تێبینی: ئەڤە تنێ جارەکێ دهێتە نیشاندان ل دەستپێکا بەرنامەی</p>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes ring { 0% { transform: rotate(0); } 5% { transform: rotate(15deg); } 10% { transform: rotate(-15deg); } 15% { transform: rotate(12deg); } 20% { transform: rotate(-12deg); } 25% { transform: rotate(0); } 100% { transform: rotate(0); } }

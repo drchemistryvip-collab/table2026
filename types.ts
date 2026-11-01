@@ -62,6 +62,7 @@ export interface ScheduleChangeRequest {
   teacherName: string;
   subject: string;
   requestedSchedule: WeekSchedule;
+  requestedSettings?: Partial<AlarmSettings>;
   previousSchedule?: WeekSchedule;
   changesSummary: string[];
   status: 'pending' | 'approved' | 'rejected';
@@ -227,6 +228,7 @@ export interface TeacherTimetableDoc {
   subject: string;
   lessonCountPerDay?: number;
   schedule: WeekSchedule;
+  alarmSettings?: Partial<AlarmSettings>;
   notes?: string;
   updatedAt?: string;
   createdBy?: string;
