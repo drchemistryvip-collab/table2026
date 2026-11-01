@@ -923,6 +923,33 @@ const App: React.FC = () => {
   const shouldStopRef = useRef<boolean>(false);
   const lastTriggeredRef = useRef<string>("");
 
+  const enableBackgroundAlarmsAndAudio = async () => {
+    try {
+      if ('Notification' in window && Notification.permission !== 'granted') {
+        await Notification.requestPermission();
+      }
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        if (!audioContextRef.current) {
+          audioContextRef.current = new AudioCtx();
+        }
+        if (audioContextRef.current.state === 'suspended') {
+          await audioContextRef.current.resume();
+        }
+        const osc = audioContextRef.current.createOscillator();
+        const gain = audioContextRef.current.createGain();
+        gain.gain.value = 0.01;
+        osc.connect(gain);
+        gain.connect(audioContextRef.current.destination);
+        osc.start();
+        osc.stop(audioContextRef.current.currentTime + 0.1);
+      }
+      alert("🔔 زەنگ و دەنگێ مۆبایلێ ب سەرکەفتیانە د باکگراوندێ دا هاتە چالاککرن! نوکە دێ جەرەس کار کەت خو ئەگەر بەرنامە د سەر شاشەیێ مۆبایلێ (Home Screen) دا ژی بیتن.");
+    } catch (e: any) {
+      alert("🔔 زەنگ و دەنگ چالاک بوو!");
+    }
+  };
+
   const getEffectiveTime = () => {
     if (manualTimeStr) {
       const [h, m] = manualTimeStr.split(':').map(Number);
@@ -8106,63 +8133,6 @@ const App: React.FC = () => {
       ) : (
         /* VIEW: CLASSIC TABLE (PRINTABLE / DESKTOP VIEW) */
         <main className="max-w-6xl mx-auto px-4 pt-6 pb-12 animate-in fade-in duration-300 space-y-4">
-          {/* Gemini AI Action Bar for Table View */}
-          <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-purple-900 rounded-3xl p-4 sm:p-5 text-white shadow-xl flex flex-wrap items-center justify-between gap-4 border border-indigo-700/50 no-print">
-            <div className="flex items-center gap-3.5">
-              <div className="p-3 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 shadow-inner">
-                <Sparkles className="w-6 h-6 text-yellow-300 animate-spin-slow" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-black text-base text-white">زیرەکییا دەستکرد (Gemini AI) د جەتوەلێ دا</h3>
-                  <span className="bg-yellow-400 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
-                    چالاکە
-                  </span>
-                </div>
-                <p className="text-xs text-indigo-200 mt-0.5">
-                  وێنەیێ جەتوەلا وانان باربکە، ئێکسەر دێ هێتە شیکارکرن و تەوزیعکرن د ڤێ خشتەیێ دا
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => setShowAiImportModal(true)}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-white text-indigo-900 hover:bg-yellow-300 hover:text-slate-950 font-black text-xs shadow-lg active:scale-95 transition-all"
-              >
-                <Sparkles className="w-4 h-4 text-indigo-600" />
-                <span>سکەن و هێنانا جەتوەلێ ب Gemini AI</span>
-              </button>
-              {!isStandalone && (
-                <button
-                  onClick={triggerInstallApp}
-                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-white font-bold text-xs shadow-md active:scale-95 transition-all"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>دابەزاندنا ئەپێ (PWA)</span>
-                </button>
-              )}
-              <button
-                onClick={exportLocalStorageBackup}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-white/15 hover:bg-white/25 text-white font-bold text-xs border border-white/20 backdrop-blur-sm active:scale-95 transition-all"
-                title="داگرتنی کۆپییەکی یەدەگی داتای LocalStorage"
-              >
-                <ArrowDownToLine className="w-4 h-4 text-cyan-300" />
-                <span>داگرتنا Backup</span>
-              </button>
-              <button
-                onClick={() => {
-                  setSettingsActiveTab('ai');
-                  setShowSettingsModal(true);
-                }}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-white/15 hover:bg-white/25 text-white font-bold text-xs border border-white/20 backdrop-blur-sm active:scale-95 transition-all"
-              >
-                <Wand2 className="w-4 h-4 text-indigo-200" />
-                <span>ڕێکخستنا وەختی ب دەق (AI)</span>
-              </button>
-            </div>
-          </div>
-
           {/* Table Header Bar & Mobile Fit / Theme Controls */}
           <div className="bg-white p-3 sm:p-5 shadow-xl border border-slate-200/80 rounded-3xl space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3 border-slate-100">
@@ -8224,14 +8194,37 @@ const App: React.FC = () => {
                   </button>
                 </div>
 
+                {/* Compact Gemini AI Trigger Button */}
                 <button
                   onClick={() => setShowAiImportModal(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-black border border-indigo-200 shadow-xs transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-black shadow-sm active:scale-95 transition-all"
+                  title="سکەن و هێنانا جەتوەلێ ب زیرەکیا دەستکرد"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                  <span className="hidden sm:inline">Gemini AI</span>
+                  <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
+                  <span>Gemini AI</span>
                 </button>
 
+                {/* Enable Audio / Background Sound Unlock Button */}
+                <button
+                  onClick={enableBackgroundAlarmsAndAudio}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black shadow-sm active:scale-95 transition-all"
+                  title="چالاککرنا زەنگ د باکگراوند و شاشەیا مۆبایلێ دا"
+                >
+                  <Bell className="w-3.5 h-3.5" />
+                  <span>زەنگا باکگراوندێ</span>
+                </button>
+
+                {/* LocalStorage Backup Export */}
+                <button
+                  onClick={exportLocalStorageBackup}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white text-xs font-bold shadow-sm active:scale-95 transition-all"
+                  title="داگرتنا Backup"
+                >
+                  <ArrowDownToLine className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Backup</span>
+                </button>
+
+                {/* Print Button */}
                 <button
                   onClick={() => window.print()}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 shadow-xs transition-all"
