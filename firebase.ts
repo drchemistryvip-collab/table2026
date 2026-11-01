@@ -158,4 +158,49 @@ export async function saveSchoolSettingsToFirestore(settings: any) {
   }
 }
 
+// Schedule Change Requests Collection (Teacher proposed edits sent to Admin for approval)
+export const SCHEDULE_CHANGE_REQUESTS_COLLECTION = 'schedule_change_requests';
+
+export async function submitScheduleChangeRequest(req: any): Promise<boolean> {
+  try {
+    const docRef = doc(db, SCHEDULE_CHANGE_REQUESTS_COLLECTION, req.id);
+    await setDoc(docRef, { ...req, updatedAt: new Date().toISOString() }, { merge: true });
+    return true;
+  } catch (err) {
+    console.warn("Could not submit change request to Firestore (offline fallback active):", err);
+    return false;
+  }
+}
+
+export async function updateScheduleChangeRequestStatus(
+  id: string, 
+  status: 'approved' | 'rejected', 
+  adminNotes: string = ''
+): Promise<boolean> {
+  try {
+    const docRef = doc(db, SCHEDULE_CHANGE_REQUESTS_COLLECTION, id);
+    await updateDoc(docRef, {
+      status,
+      adminNotes,
+      reviewedAt: new Date().toISOString()
+    });
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `${SCHEDULE_CHANGE_REQUESTS_COLLECTION}/${id}`);
+    return false;
+  }
+}
+
+export async function deleteScheduleChangeRequest(id: string): Promise<boolean> {
+  try {
+    const docRef = doc(db, SCHEDULE_CHANGE_REQUESTS_COLLECTION, id);
+    await deleteDoc(docRef);
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `${SCHEDULE_CHANGE_REQUESTS_COLLECTION}/${id}`);
+    return false;
+  }
+}
+
+
 

@@ -28,6 +28,20 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["id"]
+    },
+    "ScheduleChangeRequest": {
+      "title": "Schedule Change Request",
+      "description": "Teacher proposed schedule changes awaiting admin approval",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "subject": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "teacherId", "teacherName", "status"]
     }
   },
   "firestore": {
@@ -38,6 +52,10 @@
     "/config/{configId}": {
       "schema": "AppConfig",
       "description": "Collection of global app configuration documents"
+    },
+    "/schedule_change_requests/{requestId}": {
+      "schema": "ScheduleChangeRequest",
+      "description": "Collection of schedule change requests"
     }
   }
 }

@@ -48,8 +48,24 @@ export interface AlarmSettings {
   longBreakLesson: number;  // e.g. 3 (after lesson 3)
   longBreakDuration: number; // e.g. 10 or 15 mins
   allKurdishLettersEnabled?: boolean; // If enabled, includes all Kurdish alphabet letters A-Z for all grades
+  customSections?: string[]; // Specific section letters chosen by admin (e.g. ['ئـ', 'ب', 'ج', 'د'])
+  customSectionsCount?: number; // How many section letters to activate
   dayShifts?: Record<string, ShiftType>; // Sunday & Monday: evening; Tue, Wed, Thu: morning
   examSettings: ExamSettings;
+}
+
+export interface ScheduleChangeRequest {
+  id: string;
+  teacherId: string;
+  teacherName: string;
+  subject: string;
+  requestedSchedule: WeekSchedule;
+  previousSchedule?: WeekSchedule;
+  changesSummary: string[];
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  reviewedAt?: string;
+  adminNotes?: string;
 }
 
 export const DEFAULT_DAY_SHIFTS: Record<string, ShiftType> = {
@@ -79,6 +95,8 @@ export const DEFAULT_ALARM_SETTINGS: AlarmSettings = {
   longBreakLesson: 3,
   longBreakDuration: 10,
   allKurdishLettersEnabled: false,
+  customSections: ['ئـ', 'ب', 'ج', 'د', 'هـ', 'و', 'ز'],
+  customSectionsCount: 7,
   dayShifts: { ...DEFAULT_DAY_SHIFTS },
   examSettings: {
     enabled: false,
@@ -100,11 +118,11 @@ export const GRADES = [
 ];
 
 // Standard Sections up to 'ز' by default
-export const STANDARD_SECTIONS = ['أ', 'ب', 'ج', 'د', 'هـ', 'و', 'ز'];
+export const STANDARD_SECTIONS = ['ئـ', 'ب', 'ج', 'د', 'هـ', 'و', 'ز'];
 
 // Full Kurdish Alphabet Sections (کاتێک لە ڕێکخستنەکان چالاک دەکرێت)
 export const ALL_KURDISH_SECTIONS = [
-  'ئـ', 'ا', 'أ', 'ب', 'پ', 'ت', 'ج', 'چ', 'ح', 'خ', 
+  'ئـ', 'ا', 'ب', 'پ', 'ت', 'ج', 'چ', 'ح', 'خ', 
   'د', 'ر', 'ڕ', 'ز', 'ژ', 'س', 'ش', 'ص', 'ض', 'ط', 
   'ظ', 'ع', 'غ', 'ف', 'ڤ', 'ق', 'ک', 'گ', 'ل', 'ڵ', 
   'م', 'ن', 'هـ', 'و', 'ۆ', 'ی', 'ێ'
@@ -113,9 +131,19 @@ export const ALL_KURDISH_SECTIONS = [
 // Backward-compatible export: defaults to up to 'ز'
 export const SECTIONS = STANDARD_SECTIONS;
 
-// Helper to get active sections based on Kurdish alphabet setting
-export const getActiveSections = (enableAllKurdish: boolean = false): string[] => {
-  return enableAllKurdish ? ALL_KURDISH_SECTIONS : STANDARD_SECTIONS;
+// Helper to get active sections based on Kurdish alphabet setting or custom admin selection
+export const getActiveSections = (settings?: AlarmSettings | boolean): string[] => {
+  if (typeof settings === 'object' && settings !== null) {
+    if (Array.isArray(settings.customSections) && settings.customSections.length > 0) {
+      return settings.customSections;
+    }
+    if (settings.allKurdishLettersEnabled) {
+      return ALL_KURDISH_SECTIONS;
+    }
+  } else if (typeof settings === 'boolean' && settings === true) {
+    return ALL_KURDISH_SECTIONS;
+  }
+  return STANDARD_SECTIONS;
 };
 
 // All Kurdish School Subjects (بابەت)
@@ -144,8 +172,8 @@ export const ALL_SUBJECTS = [
 ];
 
 // Generate Classes for Grades 10, 11, 12 up to 'ز' (and support all Kurdish letters)
-export const generateClassList = (enableAllKurdish: boolean = false): string[] => {
-  const secs = enableAllKurdish ? ALL_KURDISH_SECTIONS : STANDARD_SECTIONS;
+export const generateClassList = (settings?: AlarmSettings | boolean): string[] => {
+  const secs = getActiveSections(settings);
   const list: string[] = ['بێ وانە'];
 
   // High school Grade 10 (دەهـ)
@@ -164,7 +192,7 @@ export const generateClassList = (enableAllKurdish: boolean = false): string[] =
 
   // Basic schools 1 to 9
   for (let g = 1; g <= 9; g++) {
-    secs.slice(0, 4).forEach(s => list.push(`پۆلا ${g} - ${s}`));
+    secs.forEach(s => list.push(`پۆلا ${g} - ${s}`));
   }
 
   // Bare letters

@@ -17,7 +17,8 @@ import {
   ALL_KURDISH_SECTIONS,
   getActiveSections,
   generateClassList,
-  DEFAULT_DAY_SHIFTS
+  DEFAULT_DAY_SHIFTS,
+  ScheduleChangeRequest
 } from './types';
 import { INITIAL_SCHEDULE, VOICE_SCRIPTS, calculateSlotTimes, generateSlotsForDay } from './constants';
 
@@ -282,7 +283,11 @@ import {
   SCHOOL_SETTINGS_COLLECTION,
   SETTINGS_GLOBAL_DOC,
   saveSchoolSettingsToFirestore,
-  fetchSchoolSettingsFromFirestore
+  fetchSchoolSettingsFromFirestore,
+  SCHEDULE_CHANGE_REQUESTS_COLLECTION,
+  submitScheduleChangeRequest,
+  updateScheduleChangeRequestStatus,
+  deleteScheduleChangeRequest
 } from './firebase';
 import { TeacherTimetableDoc, SwapSuggestion } from './types';
 
@@ -444,6 +449,60 @@ const mergeUserSchedule = (savedSchedule: WeekSchedule, initialTemplate: WeekSch
   return merged;
 };
 
+export const getDayShift = (dayName: string, sched?: WeekSchedule, settings?: AlarmSettings): ShiftType => {
+  if (settings?.dayShifts && settings.dayShifts[dayName]) {
+    return settings.dayShifts[dayName];
+  }
+  if (DEFAULT_DAY_SHIFTS[dayName]) {
+    return DEFAULT_DAY_SHIFTS[dayName];
+  }
+  return (dayName === 'ئێکشەمبی' || dayName === 'دووشەمبی') ? 'evening' : 'morning';
+};
+
+export const reconcileScheduleWithDayShifts = (
+  sched: WeekSchedule,
+  settings: AlarmSettings = DEFAULT_ALARM_SETTINGS
+): WeekSchedule => {
+  if (!sched || typeof sched !== 'object') return INITIAL_SCHEDULE;
+  const reconciled: WeekSchedule = {};
+
+  DAYS.forEach((dayName) => {
+    const existingDay = sched[dayName] || INITIAL_SCHEDULE[dayName];
+    const targetShift = getDayShift(dayName, sched, settings);
+    const times = calculateSlotTimes(targetShift, settings);
+    const existingSlots = existingDay?.slots || [];
+    const count = settings.lessonCount || 6;
+    const newSlots: LessonSlot[] = [];
+
+    for (let i = 0; i < count; i++) {
+      const t = times[i] || { 
+        start: targetShift === 'morning' ? (settings.morningStartTime || "08:00") : (settings.eveningStartTime || "12:30"), 
+        end: targetShift === 'morning' ? "08:35" : "13:00", 
+        isExam: false 
+      };
+      const ex = existingSlots[i];
+      newSlots.push({
+        id: ex ? ex.id : `slot_${dayName}_${i}_${Math.random().toString(36).substring(2, 6)}`,
+        lessonNumber: i + 1,
+        startTime: t.start,
+        endTime: t.end,
+        className: ex ? ex.className : 'بێ وانە',
+        subject: ex ? ex.subject : 'کیمیا',
+        isExam: t.isExam,
+      });
+    }
+
+    reconciled[dayName] = {
+      ...existingDay,
+      dayName,
+      shift: targetShift,
+      slots: newSlots,
+    };
+  });
+
+  return reconciled;
+};
+
 const DEFAULT_SEED_TEACHERS: TeacherTimetableDoc[] = [
   {
     id: 'teacher_hussein',
@@ -460,11 +519,11 @@ const DEFAULT_SEED_TEACHERS: TeacherTimetableDoc[] = [
     subject: 'فیزیا',
     lessonCountPerDay: 6,
     schedule: {
-      'ئێکشەمبی': { dayName: 'ئێکشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - د', '10 - ب', 'بێ وانە', '10 - و', 'بێ وانە', '10 - هـ']) },
-      'دووشەمبی': { dayName: 'دووشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - هـ', 'بێ وانە', '10 - ج', '10 - ب', 'بێ وانە', '10 - و']) },
+      'ئێکشەمبی': { dayName: 'ئێکشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - د', '10 - ب', 'بێ وانە', '10 - و', 'بێ وانە', '10 - هـ']) },
+      'دووشەمبی': { dayName: 'دووشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - هـ', 'بێ وانە', '10 - ج', '10 - ب', 'بێ وانە', '10 - و']) },
       'سێشەمبی': { dayName: 'سێشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - و', '10 - هـ', 'بێ وانە', '10 - د', 'بێ وانە', '10 - ج']) },
-      'چوارشەمبی': { dayName: 'چوارشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - ب', '10 - د', 'بێ وانە', '10 - هـ', '10 - ج', '10 - و']) },
-      'پێنچ شەمبی': { dayName: 'پێنچ شەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - د', '10 - و', 'بێ وانە', '10 - ب', 'بێ وانە', '10 - هـ']) }
+      'چوارشەمبی': { dayName: 'چوارشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - ب', '10 - د', 'بێ وانە', '10 - هـ', '10 - ج', '10 - و']) },
+      'پێنچ شەمبی': { dayName: 'پێنچ شەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - د', '10 - و', 'بێ وانە', '10 - ب', 'بێ وانە', '10 - هـ']) }
     },
     notes: 'م. ئەحمەد - فیزیا',
     updatedAt: new Date().toISOString()
@@ -475,11 +534,11 @@ const DEFAULT_SEED_TEACHERS: TeacherTimetableDoc[] = [
     subject: 'بیرکاری',
     lessonCountPerDay: 6,
     schedule: {
-      'ئێکشەمبی': { dayName: 'ئێکشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - ج', 'بێ وانە', '10 - ب', '10 - د', 'بێ وانە', '10 - هـ']) },
-      'دووشەمبی': { dayName: 'دووشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - د', '10 - ج', 'بێ وانە', '10 - و', 'بێ وانە', '10 - ب']) },
+      'ئێکشەمبی': { dayName: 'ئێکشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - ج', 'بێ وانە', '10 - ب', '10 - د', 'بێ وانە', '10 - هـ']) },
+      'دووشەمبی': { dayName: 'دووشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - د', '10 - ج', 'بێ وانە', '10 - و', 'بێ وانە', '10 - ب']) },
       'سێشەمبی': { dayName: 'سێشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - ب', '10 - د', 'بێ وانە', '10 - ج', 'بێ وانە', '10 - و']) },
-      'چوارشەمبی': { dayName: 'چوارشەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - ج', '10 - و', 'بێ وانە', '10 - د', '10 - هـ', '10 - ب']) },
-      'پێنچ شەمبی': { dayName: 'پێنچ شەمبی', shift: 'evening', slots: generateSlotsForDay('evening', ['10 - و', '10 - ب', 'بێ وانە', '10 - ج', 'بێ وانە', '10 - د']) }
+      'چوارشەمبی': { dayName: 'چوارشەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - ج', '10 - و', 'بێ وانە', '10 - د', '10 - هـ', '10 - ب']) },
+      'پێنچ شەمبی': { dayName: 'پێنچ شەمبی', shift: 'morning', slots: generateSlotsForDay('morning', ['10 - و', '10 - ب', 'بێ وانە', '10 - ج', 'بێ وانە', '10 - د']) }
     },
     notes: 'م. ئاراز - بیرکاری',
     updatedAt: new Date().toISOString()
@@ -494,13 +553,19 @@ const getInitialAllTeachersList = (): TeacherTimetableDoc[] => {
     if (cached) {
       const parsed = JSON.parse(cached);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        return parsed.map((t: TeacherTimetableDoc) => ({
+          ...t,
+          schedule: reconcileScheduleWithDayShifts(t.schedule, DEFAULT_ALARM_SETTINGS)
+        }));
       }
     }
   } catch (err) {
     console.warn("Failed reading cached teachers list:", err);
   }
-  return DEFAULT_SEED_TEACHERS;
+  return DEFAULT_SEED_TEACHERS.map((t) => ({
+    ...t,
+    schedule: reconcileScheduleWithDayShifts(t.schedule, DEFAULT_ALARM_SETTINGS)
+  }));
 };
 
 const getKurdishDayName = (date: Date = new Date()): string => {
@@ -536,10 +601,12 @@ const App: React.FC = () => {
       const saved = localStorage.getItem('timetable_data');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object') return parsed;
+        if (parsed && typeof parsed === 'object') {
+          return reconcileScheduleWithDayShifts(parsed, DEFAULT_ALARM_SETTINGS);
+        }
       }
     } catch (e) {}
-    return INITIAL_SCHEDULE;
+    return reconcileScheduleWithDayShifts(INITIAL_SCHEDULE, DEFAULT_ALARM_SETTINGS);
   });
   const [activeDay, setActiveDay] = useState<string>(getKurdishDayName(new Date()));
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
@@ -555,6 +622,21 @@ const App: React.FC = () => {
   const [teacherName, setTeacherName] = useState<string>(() => localStorage.getItem('teacher_name') || "ماموستا حوسێن");
   const [teacherSubject, setTeacherSubject] = useState<string>(() => localStorage.getItem('teacher_subject') || "کیمیا");
   const [activeTheme, setActiveTheme] = useState(THEMES[0]);
+  const [fitMobileScreen, setFitMobileScreen] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('fit_mobile_screen');
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch (e) {
+      return true;
+    }
+  });
+  const [tablePastelTheme, setTablePastelTheme] = useState<'rose' | 'indigo' | 'emerald' | 'amber'>(() => {
+    try {
+      return (localStorage.getItem('table_pastel_theme') as any) || 'rose';
+    } catch (e) {
+      return 'rose';
+    }
+  });
 
   // PWA Install & Platform Detection
   const [isStandalone, setIsStandalone] = useState(false);
@@ -657,10 +739,19 @@ const App: React.FC = () => {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') {
+          const mergedShifts: Record<string, ShiftType> = { ...DEFAULT_DAY_SHIFTS, ...(parsed.dayShifts || {}) };
+          if ((parsed as any)._v10SunMonShiftMigrated !== true) {
+            mergedShifts['ئێکشەمبی'] = 'evening';
+            mergedShifts['دووشەمبی'] = 'evening';
+            mergedShifts['سێشەمبی'] = 'morning';
+            mergedShifts['چوارشەمبی'] = 'morning';
+            mergedShifts['پێنچ شەمبی'] = 'morning';
+          }
           return {
             ...DEFAULT_ALARM_SETTINGS,
             ...parsed,
-            dayShifts: { ...DEFAULT_DAY_SHIFTS, ...(parsed.dayShifts || {}) },
+            _v10SunMonShiftMigrated: true,
+            dayShifts: mergedShifts,
             examSettings: { ...DEFAULT_ALARM_SETTINGS.examSettings, ...(parsed.examSettings || {}) }
           };
         }
@@ -729,7 +820,14 @@ const App: React.FC = () => {
   const [adminBatchLoading, setAdminBatchLoading] = useState<boolean>(false);
   const [adminSuccessMsg, setAdminSuccessMsg] = useState<string | null>(null);
   const [adminCodeInput, setAdminCodeInput] = useState<string>('');
-  const [adminImportTab, setAdminImportTab] = useState<'code' | 'file' | 'edit' | 'timings'>('edit');
+  const [adminImportTab, setAdminImportTab] = useState<'edit' | 'requests' | 'timings' | 'sections' | 'code' | 'file'>('edit');
+
+  // Teacher Schedule Change Requests & Admin Review State
+  const [changeRequests, setChangeRequests] = useState<ScheduleChangeRequest[]>([]);
+  const [requestActionLoadingId, setRequestActionLoadingId] = useState<string | null>(null);
+  const [teacherSubmittedStatus, setTeacherSubmittedStatus] = useState<string | null>(null);
+  const [requestFilterStatus, setRequestFilterStatus] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [adminCustomSectionInput, setAdminCustomSectionInput] = useState<string>('');
 
   // Admin Direct Timetable Editor State
   const [adminEditingTeacher, setAdminEditingTeacher] = useState<TeacherTimetableDoc | null>(null);
@@ -773,9 +871,13 @@ const App: React.FC = () => {
       try {
         const idbData = await getBackupData(OFFLINE_TEACHERS_STORAGE_KEY);
         if (Array.isArray(idbData) && idbData.length > 0) {
-          setAllTeachersList((prev) => (idbData.length >= prev.length ? idbData : prev));
+          const reconciledIDB = idbData.map((t: TeacherTimetableDoc) => ({
+            ...t,
+            schedule: reconcileScheduleWithDayShifts(t.schedule, alarmSettings)
+          }));
+          setAllTeachersList((prev) => (reconciledIDB.length >= prev.length ? reconciledIDB : prev));
           try {
-            localStorage.setItem(OFFLINE_TEACHERS_STORAGE_KEY, JSON.stringify(idbData));
+            localStorage.setItem(OFFLINE_TEACHERS_STORAGE_KEY, JSON.stringify(reconciledIDB));
           } catch (e) {}
         }
       } catch (err) {
@@ -784,6 +886,37 @@ const App: React.FC = () => {
     };
     restoreOfflineTeachersFromIDB();
   }, []);
+
+  // 1.5 Auto-Reconcile Cached Timetables with current day shifts and lesson timings
+  useEffect(() => {
+    setSchedule((prev) => {
+      const reconciled = reconcileScheduleWithDayShifts(prev, alarmSettings);
+      try {
+        localStorage.setItem('timetable_data', JSON.stringify(reconciled));
+        saveBackupData('timetable_data', reconciled);
+      } catch (e) {}
+      return reconciled;
+    });
+
+    setAllTeachersList((prevList) => {
+      const updated = prevList.map((t) => ({
+        ...t,
+        schedule: reconcileScheduleWithDayShifts(t.schedule, alarmSettings),
+      }));
+      try {
+        localStorage.setItem(OFFLINE_TEACHERS_STORAGE_KEY, JSON.stringify(updated));
+        saveBackupData(OFFLINE_TEACHERS_STORAGE_KEY, updated);
+      } catch (e) {}
+      return updated;
+    });
+  }, [
+    alarmSettings.dayShifts,
+    alarmSettings.morningDuration,
+    alarmSettings.eveningDuration,
+    alarmSettings.morningStartTime,
+    alarmSettings.eveningStartTime,
+    alarmSettings.examSettings?.enabled
+  ]);
 
   // 2. Real-time Firestore sync with dual persistent offline storage
   useEffect(() => {
@@ -804,12 +937,16 @@ const App: React.FC = () => {
             saveBackupData(OFFLINE_TEACHERS_STORAGE_KEY, DEFAULT_SEED_TEACHERS);
           } catch (e) {}
         } else {
-          setAllTeachersList(list);
+          const reconciledList = list.map((t) => ({
+            ...t,
+            schedule: reconcileScheduleWithDayShifts(t.schedule, alarmSettings)
+          }));
+          setAllTeachersList(reconciledList);
           try {
-            localStorage.setItem(OFFLINE_TEACHERS_STORAGE_KEY, JSON.stringify(list));
-            saveBackupData(OFFLINE_TEACHERS_STORAGE_KEY, list);
+            localStorage.setItem(OFFLINE_TEACHERS_STORAGE_KEY, JSON.stringify(reconciledList));
+            saveBackupData(OFFLINE_TEACHERS_STORAGE_KEY, reconciledList);
           } catch (e) {
-            saveBackupData(OFFLINE_TEACHERS_STORAGE_KEY, list);
+            saveBackupData(OFFLINE_TEACHERS_STORAGE_KEY, reconciledList);
           }
         }
       }, (err) => {
@@ -819,7 +956,7 @@ const App: React.FC = () => {
       console.warn("Snapshot setup error:", e);
     }
     return () => { if (unsub) unsub(); };
-  }, []);
+  }, [alarmSettings.dayShifts]);
 
   // 3. Real-time Master School Settings Firestore Sync (Broadcast to Everyone)
   useEffect(() => {
@@ -834,6 +971,8 @@ const App: React.FC = () => {
               const merged: AlarmSettings = {
                 ...prev,
                 ...remoteData,
+                customSections: remoteData.customSections || prev.customSections || STANDARD_SECTIONS,
+                customSectionsCount: remoteData.customSectionsCount || prev.customSectionsCount || 7,
                 dayShifts: { ...DEFAULT_DAY_SHIFTS, ...(remoteData.dayShifts || prev.dayShifts || {}) },
                 examSettings: {
                   ...prev.examSettings,
@@ -857,6 +996,133 @@ const App: React.FC = () => {
     return () => { if (unsubSettings) unsubSettings(); };
   }, []);
 
+  // 4. Real-time Teacher Schedule Change Requests Listener (For Admin Review & Sync)
+  useEffect(() => {
+    let unsubReqs: (() => void) | null = null;
+    try {
+      unsubReqs = onSnapshot(collection(db, SCHEDULE_CHANGE_REQUESTS_COLLECTION), (snapshot) => {
+        const reqList: ScheduleChangeRequest[] = [];
+        snapshot.forEach((docSnap) => {
+          reqList.push({ id: docSnap.id, ...(docSnap.data() as any) });
+        });
+        reqList.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        setChangeRequests(reqList);
+      }, (err) => {
+        console.warn("Change requests listener (offline mode active):", err);
+      });
+    } catch (e) {
+      console.warn("Requests snapshot setup error:", e);
+    }
+    return () => { if (unsubReqs) unsubReqs(); };
+  }, []);
+
+  // Teacher Schedule Edit Flow: Instant Offline Save + Online Submission to Admin for Global Sync
+  const handleTeacherSaveAndSubmitChange = async (updatedSchedule: WeekSchedule) => {
+    // 1. Instantly save locally on this device as offline
+    setSchedule(updatedSchedule);
+    localStorage.setItem('timetable_data', JSON.stringify(updatedSchedule));
+    saveBackupData('timetable_data', updatedSchedule);
+    setIsSaved(true);
+    setTimeout(() => setIsSaved(false), 3000);
+
+    // 2. Compute differences compared to the official timetable in allTeachersList
+    const officialDoc = allTeachersList.find(t => t.id === selectedTeacherId || t.teacherName === teacherName);
+    const officialSchedule = officialDoc?.schedule || INITIAL_SCHEDULE;
+
+    const changesSummary: string[] = [];
+    DAYS.forEach(day => {
+      const newSlots = updatedSchedule[day]?.slots || [];
+      const oldSlots = officialSchedule[day]?.slots || [];
+      newSlots.forEach((slot, i) => {
+        const oldSlot = oldSlots[i];
+        if (oldSlot && (oldSlot.className !== slot.className || oldSlot.subject !== slot.subject)) {
+          changesSummary.push(`ڕۆژا ${day} - وانا ${i + 1}: [${oldSlot.className || 'بەتاڵ'}] ⬅️ [${slot.className || 'بەتاڵ'}]`);
+        }
+      });
+    });
+
+    if (changesSummary.length === 0) {
+      changesSummary.push(`دەستکاریا کات یان وانان لە لایەن مامۆستا ${teacherName}`);
+    }
+
+    // 3. Online submit proposal to admin
+    const reqId = `req_${(selectedTeacherId || 'teacher').replace(/\s+/g, '_')}_${Date.now()}`;
+    const changeReq: ScheduleChangeRequest = {
+      id: reqId,
+      teacherId: selectedTeacherId || 'teacher_hussein',
+      teacherName: teacherName,
+      subject: teacherSubject,
+      requestedSchedule: updatedSchedule,
+      previousSchedule: officialSchedule,
+      changesSummary,
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
+
+    const sent = await submitScheduleChangeRequest(changeReq);
+    if (sent) {
+      setTeacherSubmittedStatus(`✅ دەستکاریا تە ل سەر مۆبایلا تە خەزن بوو (ئۆفلاین)! داخوازی ئۆنلاین بۆ ئەدمینی هاتە هنارتن دا پەسەند بکەت و ل هەمی جهـان بەڵاڤ بکەت.`);
+    } else {
+      setTeacherSubmittedStatus(`✅ دەستکاریا تە بە سەرکەوتوویی ئۆفلاین خەزن بوو.`);
+    }
+    setTimeout(() => setTeacherSubmittedStatus(null), 8000);
+  };
+
+  // Admin Approve Teacher Request: Updates Master Timetables in Firestore & Syncs to All Devices
+  const handleAdminApproveChangeRequest = async (req: ScheduleChangeRequest) => {
+    setRequestActionLoadingId(req.id);
+    try {
+      await saveTimetableToFirestore(req.teacherId, {
+        id: req.teacherId,
+        teacherName: req.teacherName,
+        subject: req.subject,
+        schedule: req.requestedSchedule,
+        updatedAt: new Date().toISOString()
+      });
+
+      await updateScheduleChangeRequestStatus(req.id, 'approved', 'پەسەندکرا لە لایەن ئەدمین');
+
+      setAllTeachersList((prev) => {
+        const updated = prev.map(t => {
+          if (t.id === req.teacherId || t.teacherName === req.teacherName) {
+            return { ...t, schedule: req.requestedSchedule, updatedAt: new Date().toISOString() };
+          }
+          return t;
+        });
+        try {
+          localStorage.setItem(OFFLINE_TEACHERS_STORAGE_KEY, JSON.stringify(updated));
+          saveBackupData(OFFLINE_TEACHERS_STORAGE_KEY, updated);
+        } catch (e) {}
+        return updated;
+      });
+
+      if (selectedTeacherId === req.teacherId) {
+        setSchedule(req.requestedSchedule);
+        localStorage.setItem('timetable_data', JSON.stringify(req.requestedSchedule));
+        saveBackupData('timetable_data', req.requestedSchedule);
+      }
+
+      alert(`🎉 داخوازییا مامۆستا [${req.teacherName}] ب سەرکەفتیانە هاتە قبوولکرن و ل هەموو مۆبایل و قوتابخانێ بەڵاڤ بوو!`);
+    } catch (err: any) {
+      alert("خەلەتی لە پەسەندکردندا: " + err.message);
+    } finally {
+      setRequestActionLoadingId(null);
+    }
+  };
+
+  // Admin Reject Teacher Request
+  const handleAdminRejectChangeRequest = async (req: ScheduleChangeRequest, notes: string = '') => {
+    setRequestActionLoadingId(req.id);
+    try {
+      await updateScheduleChangeRequestStatus(req.id, 'rejected', notes || 'ڕەتکرایەوە لە لایەن ئەدمین');
+      alert(`داخوازییا مامۆستا [${req.teacherName}] هاتە ڕەتکرن.`);
+    } catch (err: any) {
+      alert("خەلەتی: " + err.message);
+    } finally {
+      setRequestActionLoadingId(null);
+    }
+  };
+
   const handleAdminSaveMasterSettings = async (overrideSettings?: AlarmSettings) => {
     const targetToSave = overrideSettings || alarmSettings;
     setAdminSavingSettings(true);
@@ -869,7 +1135,7 @@ const App: React.FC = () => {
         saveBackupData('alarm_settings_v10', targetToSave);
       } catch (e) {}
       applySettingsToSchedule(targetToSave);
-      setAdminSettingsSuccessMsg("✅ وەختێت دەوامێ، خولەکێن وانان، جەرەس و انتیحانێ ب سەرکەفتیانە د داتابەیسدا هاتنە پاشکەفتن و بۆ هەموو مامۆستا و قوتابیان بەڵاڤبوون!");
+      setAdminSettingsSuccessMsg("✅ وەختێت دەوامێ، خولەکێن وانان، جەرەس، انتیحانێ و پیتێن هۆبان د داتابەیسدا هاتنە پاشکەفتن و بۆ هەمووان بەڵاڤبوون!");
       setTimeout(() => setAdminSettingsSuccessMsg(null), 6000);
     } catch (err: any) {
       alert("خەلەتی لە پاشکەفتنی وەختەکان: " + err.message);
@@ -884,32 +1150,34 @@ const App: React.FC = () => {
     if (allTeachersList.length > 0 && selectedTeacherId) {
       const activeDoc = allTeachersList.find(t => t.id === selectedTeacherId || t.teacherName === selectedTeacherId);
       if (activeDoc) {
+        const reconciledSched = reconcileScheduleWithDayShifts(activeDoc.schedule, alarmSettings);
         setTeacherName(activeDoc.teacherName);
         setTeacherSubject(activeDoc.subject || 'کیمیا');
-        setSchedule(activeDoc.schedule);
-        localStorage.setItem('timetable_data', JSON.stringify(activeDoc.schedule));
+        setSchedule(reconciledSched);
+        localStorage.setItem('timetable_data', JSON.stringify(reconciledSched));
         localStorage.setItem('teacher_name', activeDoc.teacherName);
         localStorage.setItem('teacher_subject', activeDoc.subject || 'کیمیا');
-        saveBackupData('timetable_data', activeDoc.schedule);
+        saveBackupData('timetable_data', reconciledSched);
         saveBackupData('teacher_name', activeDoc.teacherName);
         saveBackupData('teacher_subject', activeDoc.subject || 'کیمیا');
       }
     }
-  }, [allTeachersList, selectedTeacherId]);
+  }, [allTeachersList, selectedTeacherId, alarmSettings.dayShifts]);
 
   const selectTeacherProfile = (teacherDoc: TeacherTimetableDoc) => {
+    const reconciledSched = reconcileScheduleWithDayShifts(teacherDoc.schedule, alarmSettings);
     setSelectedTeacherId(teacherDoc.id);
     setTeacherName(teacherDoc.teacherName);
     setTeacherSubject(teacherDoc.subject || 'کیمیا');
-    setSchedule(teacherDoc.schedule);
+    setSchedule(reconciledSched);
     localStorage.setItem('selected_teacher_id', teacherDoc.id);
     localStorage.setItem('teacher_name', teacherDoc.teacherName);
     localStorage.setItem('teacher_subject', teacherDoc.subject || 'کیمیا');
-    localStorage.setItem('timetable_data', JSON.stringify(teacherDoc.schedule));
+    localStorage.setItem('timetable_data', JSON.stringify(reconciledSched));
     saveBackupData('selected_teacher_id', teacherDoc.id);
     saveBackupData('teacher_name', teacherDoc.teacherName);
     saveBackupData('teacher_subject', teacherDoc.subject || 'کیمیا');
-    saveBackupData('timetable_data', teacherDoc.schedule);
+    saveBackupData('timetable_data', reconciledSched);
     setShowTeacherSelectModal(false);
   };
 
@@ -1699,38 +1967,9 @@ const App: React.FC = () => {
   // Recalculate schedule slots when timing settings change
   const applySettingsToSchedule = (newSettings: AlarmSettings) => {
     setSchedule((prev) => {
-      const updated: WeekSchedule = {};
-      const count = newSettings.lessonCount || 6;
-
-      Object.keys(prev).forEach((dayKey) => {
-        const dayData = prev[dayKey];
-        const targetShift = (newSettings.dayShifts && newSettings.dayShifts[dayKey]) ? newSettings.dayShifts[dayKey] : dayData.shift;
-        const times = calculateSlotTimes(targetShift, newSettings);
-        const existingSlots = dayData.slots || [];
-        const newSlots: LessonSlot[] = [];
-
-        for (let i = 0; i < count; i++) {
-          const t = times[i] || { start: "08:00", end: "08:35", isExam: false };
-          const existing = existingSlots[i];
-          newSlots.push({
-            id: existing ? existing.id : `slot_${dayKey}_${i}_${Math.random().toString(36).substring(2, 6)}`,
-            lessonNumber: i + 1,
-            startTime: t.start,
-            endTime: t.end,
-            className: existing ? existing.className : 'بێ وانە',
-            subject: existing ? existing.subject : 'کیمیا',
-            isExam: t.isExam,
-          });
-        }
-
-        updated[dayKey] = {
-          ...dayData,
-          shift: targetShift,
-          slots: newSlots,
-        };
-      });
-
+      const updated = reconcileScheduleWithDayShifts(prev, newSettings);
       localStorage.setItem('timetable_data', JSON.stringify(updated));
+      saveBackupData('timetable_data', updated);
       return updated;
     });
   };
@@ -2142,7 +2381,8 @@ const App: React.FC = () => {
       ctx.font = '900 38px Vazirmatn, sans-serif';
       ctx.fillStyle = textColor;
       ctx.textAlign = 'center';
-      ctx.fillText(`📅 جەتوەلا ڕۆژا ${activeDay} (${todayData?.shift === 'morning' ? 'سپێدە' : 'هێڤاری'})`, width / 2, startY);
+      const dayShift = getDayShift(activeDay, schedule, alarmSettings);
+      ctx.fillText(`📅 جەتوەلا ڕۆژا ${activeDay} (${dayShift === 'morning' ? 'سپێدە' : 'نیڤڕۆ'})`, width / 2, startY);
       ctx.restore();
 
       startY += 55;
@@ -2779,11 +3019,23 @@ const App: React.FC = () => {
   }, [alarmSettings, schedule, customScripts, manualTimeStr]);
 
   const toggleDayShift = (dayName: string) => {
+    const currentShift = getDayShift(dayName, schedule, alarmSettings);
+    const newShift: ShiftType = currentShift === 'morning' ? 'evening' : 'morning';
+
+    setAlarmSettings((prevSettings) => {
+      const updatedDayShifts = { ...(prevSettings.dayShifts || DEFAULT_DAY_SHIFTS), [dayName]: newShift };
+      const newSettings = { ...prevSettings, dayShifts: updatedDayShifts };
+      try {
+        localStorage.setItem('alarm_settings_v10', JSON.stringify(newSettings));
+        saveBackupData('alarm_settings_v10', newSettings);
+      } catch (e) {}
+      return newSettings;
+    });
+
     setSchedule((prev) => {
-      const currentDay = prev[dayName];
-      const newShift: ShiftType = currentDay.shift === 'morning' ? 'evening' : 'morning';
+      const currentDay = prev[dayName] || INITIAL_SCHEDULE[dayName];
       const times = calculateSlotTimes(newShift, alarmSettings);
-      const updatedSlots = currentDay.slots.map((s, i) => ({
+      const updatedSlots = (currentDay.slots || []).map((s, i) => ({
         ...s,
         startTime: times[i] ? times[i].start : s.startTime,
         endTime: times[i] ? times[i].end : s.endTime,
@@ -2795,6 +3047,11 @@ const App: React.FC = () => {
       };
       localStorage.setItem('timetable_data', JSON.stringify(updated));
       saveBackupData('timetable_data', updated);
+
+      if (selectedTeacherId) {
+        saveTimetableToFirestore(selectedTeacherId, { schedule: updated }).catch(console.warn);
+      }
+
       return updated;
     });
   };
@@ -2837,6 +3094,7 @@ const App: React.FC = () => {
 
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 3000);
+    handleTeacherSaveAndSubmitChange(schedule);
   };
 
   const updateSlot = (dayName: string, slotId: string, updates: Partial<LessonSlot>) => {
@@ -5506,28 +5764,47 @@ const App: React.FC = () => {
                       className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 ${adminImportTab === 'edit' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-200'}`}
                     >
                       <Edit3 className="w-4 h-4 text-yellow-300" />
-                      <span>١. دەستکاریکرنی جەتوەلا مامۆستایان (1-Click)</span>
+                      <span>١. دەستکاریکرنی جەتوەلا مامۆستایان</span>
+                    </button>
+                    <button
+                      onClick={() => setAdminImportTab('requests')}
+                      className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 relative ${adminImportTab === 'requests' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-200'}`}
+                    >
+                      <Layers className="w-4 h-4 text-yellow-300" />
+                      <span>٢. داخوازیێن دەستکاریێ</span>
+                      {changeRequests.filter(r => r.status === 'pending').length > 0 && (
+                        <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-black animate-pulse">
+                          {changeRequests.filter(r => r.status === 'pending').length} نوێ
+                        </span>
+                      )}
                     </button>
                     <button
                       onClick={() => setAdminImportTab('timings')}
                       className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 ${adminImportTab === 'timings' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-200'}`}
                     >
                       <Clock className="w-4 h-4 text-yellow-300" />
-                      <span>٢. وەختێت دەوامێ، جەرەس و انتیحانێ (Master Settings)</span>
+                      <span>٣. وەختێت دەوامێ، جەرەس و انتیحانێ</span>
+                    </button>
+                    <button
+                      onClick={() => setAdminImportTab('sections')}
+                      className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 ${adminImportTab === 'sections' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-200'}`}
+                    >
+                      <Building2 className="w-4 h-4 text-yellow-300" />
+                      <span>٤. پیتێن هۆبان (Section Letters)</span>
                     </button>
                     <button
                       onClick={() => setAdminImportTab('code')}
                       className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 ${adminImportTab === 'code' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-200'}`}
                     >
                       <FileJson className="w-4 h-4" />
-                      <span>٣. داخلکردنی فایلی کۆد / JSON</span>
+                      <span>٥. داخلکردنی فایلی کۆد / JSON</span>
                     </button>
                     <button
                       onClick={() => setAdminImportTab('file')}
                       className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 ${adminImportTab === 'file' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-200'}`}
                     >
                       <Upload className="w-4 h-4" />
-                      <span>٤. بارکردنی فایلی PDF / وێنە</span>
+                      <span>٦. بارکردنی فایلی PDF / وێنە</span>
                     </button>
                   </div>
 
@@ -6116,6 +6393,428 @@ const App: React.FC = () => {
                         >
                           {adminSavingSettings ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5 text-yellow-300" />}
                           <span>💾 پاشکەفتن و بەڵاڤکرن بۆ هەموویان د Firebase دا (Save & Broadcast)</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 2: TEACHER CHANGE REQUESTS (داخوازیێن دەستکاریێ) */}
+                  {adminImportTab === 'requests' && (
+                    <div className="space-y-5 animate-in fade-in duration-200">
+                      <div className="p-4 bg-gradient-to-r from-amber-900 via-indigo-950 to-slate-900 text-white rounded-3xl shadow-md flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="p-3 bg-amber-400 text-slate-950 rounded-2xl shadow-sm">
+                            <Layers className="w-6 h-6" />
+                          </div>
+                          <div>
+                            <h4 className="font-black text-sm text-yellow-300">داخوازیێن دەستکاریکردنی جەتوەلا مامۆستایان</h4>
+                            <p className="text-xs text-amber-200">هەر دەمێ مامۆستایەک دەستکاریێ بکەت، لێرەدا دەردەکەوێت و پاش پەسەندکردن ل هەموو جەتوەلان نوێ دەبێتەوە</p>
+                          </div>
+                        </div>
+                        <span className="text-xs font-black bg-amber-400/20 text-yellow-300 px-3.5 py-1.5 rounded-full border border-yellow-400/30">
+                          {changeRequests.filter(r => r.status === 'pending').length} داخوازییا نوێ
+                        </span>
+                      </div>
+
+                      {/* Filter Bar */}
+                      <div className="flex items-center gap-2 p-1.5 bg-white rounded-2xl border border-slate-200 shadow-2xs">
+                        {[
+                          { id: 'all', label: 'هەموو داخوازییەکان', count: changeRequests.length },
+                          { id: 'pending', label: 'چاوەڕوانکراو (نوێ)', count: changeRequests.filter(r => r.status === 'pending').length },
+                          { id: 'approved', label: 'قبوولکراوەکان', count: changeRequests.filter(r => r.status === 'approved').length },
+                          { id: 'rejected', label: 'ڕەتکراوەکان', count: changeRequests.filter(r => r.status === 'rejected').length },
+                        ].map((tab) => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setRequestFilterStatus(tab.id as any)}
+                            className={`flex-1 py-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                              requestFilterStatus === tab.id
+                                ? 'bg-indigo-600 text-white shadow-xs'
+                                : 'text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span>{tab.label}</span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                              requestFilterStatus === tab.id ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                            }`}>
+                              {tab.count}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Requests List */}
+                      {(() => {
+                        const filtered = changeRequests.filter((r) => {
+                          if (requestFilterStatus === 'all') return true;
+                          return r.status === requestFilterStatus;
+                        });
+
+                        if (filtered.length === 0) {
+                          return (
+                            <div className="p-10 text-center bg-white rounded-3xl border border-dashed border-slate-300 space-y-2">
+                              <CheckCircle2 className="w-10 h-10 text-slate-400 mx-auto" />
+                              <p className="font-bold text-sm text-slate-700">هیچ داخوازییەک لەم بەشەدا نییە!</p>
+                              <p className="text-xs text-slate-500">کاتی مامۆستایان خشتەی خۆیان دەستکاری دەکەن، ڕاستەوخۆ داخوازییەکان لێرەدا تۆمار دەبن.</p>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div className="space-y-4">
+                            {filtered.map((req) => {
+                              const isLoading = requestActionLoadingId === req.id;
+                              return (
+                                <div
+                                  key={req.id}
+                                  className={`p-5 rounded-3xl border transition-all ${
+                                    req.status === 'pending'
+                                      ? 'bg-amber-50/50 border-amber-300 shadow-md ring-2 ring-amber-400/20'
+                                      : req.status === 'approved'
+                                      ? 'bg-emerald-50/40 border-emerald-200'
+                                      : 'bg-rose-50/30 border-rose-200'
+                                  }`}
+                                >
+                                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b pb-3">
+                                    <div className="flex items-center gap-3">
+                                      <div className={`p-2.5 rounded-2xl ${
+                                        req.status === 'pending' ? 'bg-amber-500 text-white' : req.status === 'approved' ? 'bg-emerald-600 text-white' : 'bg-rose-500 text-white'
+                                      }`}>
+                                        <User className="w-5 h-5" />
+                                      </div>
+                                      <div>
+                                        <div className="flex items-center gap-2">
+                                          <h4 className="font-black text-sm text-slate-900">{req.teacherName}</h4>
+                                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800">
+                                            {req.subject || 'کیمیا'}
+                                          </span>
+                                        </div>
+                                        <span className="text-[11px] text-slate-500 font-medium">
+                                          بەروار: {req.createdAt ? new Date(req.createdAt).toLocaleString('ku') : 'نوێ'}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {/* Status Badge */}
+                                    <div>
+                                      {req.status === 'pending' && (
+                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 border border-amber-300 text-amber-900 text-xs font-black animate-pulse">
+                                          <Clock className="w-3.5 h-3.5 text-amber-600" />
+                                          چاوەڕوانی پەسەندکردنە
+                                        </span>
+                                      )}
+                                      {req.status === 'approved' && (
+                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-black">
+                                          <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                          پەسەندکرا و بەڵاڤ بوو
+                                        </span>
+                                      )}
+                                      {req.status === 'rejected' && (
+                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-100 border border-rose-300 text-rose-900 text-xs font-black">
+                                          <X className="w-3.5 h-3.5 text-rose-600" />
+                                          ڕەتکرایەوە
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Changes details */}
+                                  <div className="py-3 text-xs text-slate-700 font-medium">
+                                    <div className="p-3 bg-white/80 rounded-2xl border border-slate-200">
+                                      <p className="font-bold text-slate-800 mb-1">کورتەی گۆڕانکارییەکان:</p>
+                                      <p className="text-slate-600 font-mono text-[11px] leading-relaxed">
+                                        {req.changesSummary || "دەستکاریکردنی پۆلەکان لە خشتەی حەفتانەدا"}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  {/* Action Buttons for Pending */}
+                                  {req.status === 'pending' && (
+                                    <div className="flex flex-col sm:flex-row items-center gap-2 pt-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAdminApproveChangeRequest(req)}
+                                        disabled={isLoading}
+                                        className="w-full sm:flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50"
+                                      >
+                                        {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4 text-yellow-300" />}
+                                        <span>قبوولکرن و بەڵاڤکرن بۆ هەمووان (Approve & Broadcast)</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const reason = prompt("هۆکاری ڕەتکردنەوە (ئارەزوومەندانە):") || '';
+                                          handleAdminRejectChangeRequest(req, reason);
+                                        }}
+                                        disabled={isLoading}
+                                        className="w-full sm:w-auto py-3 px-4 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-800 font-black text-xs border border-rose-200 active:scale-95 transition-all disabled:opacity-50"
+                                      >
+                                        ڕەتکرن (Reject)
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {/* TAB 4: SECTION LETTERS CONFIGURATION (دیاریکردن و تەحدیدکرنی پیتێن هۆبان) */}
+                  {adminImportTab === 'sections' && (
+                    <div className="space-y-6 animate-in fade-in duration-200">
+                      {/* Top Info Banner */}
+                      <div className="p-4 bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white rounded-3xl shadow-md flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="p-3 bg-purple-400 text-slate-950 rounded-2xl shadow-sm">
+                            <Building2 className="w-6 h-6" />
+                          </div>
+                          <div>
+                            <h4 className="font-black text-sm text-yellow-300">دیاریکردن و تەحدیدکرنی پیتێن هۆبان (Section Letters)</h4>
+                            <p className="text-xs text-purple-200">ئەدمین دەتوانێت بە دڵی خۆ ژمارەی هۆبەکان (٤، ٧، یان تا ٣٤ پیت) دیاری بکات و بە سەرکەوتوویی لە داتابەیسدا پاشکەوتی بکات</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {adminSettingsSuccessMsg && (
+                        <div className="p-4 rounded-2xl bg-emerald-50 border-2 border-emerald-300 text-emerald-900 text-xs font-black flex items-center gap-2">
+                          <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                          <span>{adminSettingsSuccessMsg}</span>
+                        </div>
+                      )}
+
+                      {/* SECTION 1: QUICK PRESETS */}
+                      <div className="p-5 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-3">
+                        <h4 className="font-black text-xs text-slate-700 flex items-center gap-2">
+                          <span>⚡ هەڵبژاردنی خێرای ژمارەی هۆبەکان:</span>
+                        </h4>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const chosen = ALL_KURDISH_SECTIONS.slice(0, 4);
+                              setAlarmSettings(prev => ({ ...prev, customSections: chosen, customSectionsCount: 4 }));
+                            }}
+                            className={`p-3 rounded-2xl border-2 text-xs font-black transition-all ${
+                              (alarmSettings.customSections?.length === 4)
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            <span className="block text-sm font-black">٤ هۆبە</span>
+                            <span className="text-[10px] opacity-80 block mt-0.5">ئـ، ب، ج، د</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAlarmSettings(prev => ({ ...prev, customSections: STANDARD_SECTIONS, customSectionsCount: 7 }));
+                            }}
+                            className={`p-3 rounded-2xl border-2 text-xs font-black transition-all ${
+                              (!alarmSettings.customSections || alarmSettings.customSections?.length === 7)
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            <span className="block text-sm font-black">٧ هۆبە (ستاندارد)</span>
+                            <span className="text-[10px] opacity-80 block mt-0.5">ئـ تا ز</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const chosen = ALL_KURDISH_SECTIONS.slice(0, 12);
+                              setAlarmSettings(prev => ({ ...prev, customSections: chosen, customSectionsCount: 12 }));
+                            }}
+                            className={`p-3 rounded-2xl border-2 text-xs font-black transition-all ${
+                              (alarmSettings.customSections?.length === 12)
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            <span className="block text-sm font-black">١٢ هۆبە (فراوان)</span>
+                            <span className="text-[10px] opacity-80 block mt-0.5">ئـ تا ل</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAlarmSettings(prev => ({ ...prev, customSections: ALL_KURDISH_SECTIONS, customSectionsCount: 34 }));
+                            }}
+                            className={`p-3 rounded-2xl border-2 text-xs font-black transition-all ${
+                              (alarmSettings.customSections?.length === 34)
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            <span className="block text-sm font-black">هەموو ئەلفوبێ (٣٤ پیت)</span>
+                            <span className="text-[10px] opacity-80 block mt-0.5">تەواوی پیتە کوردییەکان</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* SECTION 2: SLIDER FOR NUMBER OF SECTIONS */}
+                      {(() => {
+                        const activeList = getActiveSections(alarmSettings);
+                        const count = activeList.length;
+                        return (
+                          <div className="p-5 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-4">
+                            <div className="flex items-center justify-between border-b pb-3">
+                              <span className="font-black text-xs text-slate-700">ژمارەی دیاریکراوی پیتەکانی هۆبە:</span>
+                              <span className="text-base font-black px-3.5 py-1 rounded-xl bg-purple-100 text-purple-900 border border-purple-200">
+                                {count} هۆبە
+                              </span>
+                            </div>
+
+                            <div className="space-y-2">
+                              <input
+                                type="range"
+                                min={1}
+                                max={34}
+                                value={count}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  const sliced = ALL_KURDISH_SECTIONS.slice(0, val);
+                                  setAlarmSettings(prev => ({ ...prev, customSections: sliced, customSectionsCount: val }));
+                                }}
+                                className="w-full accent-purple-600 h-2 bg-slate-200 rounded-lg cursor-pointer"
+                              />
+                              <div className="flex justify-between text-[10px] text-slate-400 font-bold px-1">
+                                <span>١ هۆبە</span>
+                                <span>٧ (ستاندارد)</span>
+                                <span>١٤ هۆبە</span>
+                                <span>٢١ هۆبە</span>
+                                <span>٣٤ (هەموو ئەلفوبێ)</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* SECTION 3: INTERACTIVE 34-LETTER KURDISH ALPHABET GRID */}
+                      <div className="p-5 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-4">
+                        <div className="flex items-center justify-between border-b pb-3">
+                          <h4 className="font-black text-xs text-slate-800">
+                            هەڵبژاردنی تاک بە تاکی پیتە کوردییەکان (کلیک ل هەر پیتەکێ بکە بۆ چالاککردن یان ناچالاککردن):
+                          </h4>
+                          <span className="text-[11px] text-slate-500 font-bold">
+                            {getActiveSections(alarmSettings).length} لە ٣٤ پیت چالاکن
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-6 sm:grid-cols-9 md:grid-cols-12 gap-2">
+                          {ALL_KURDISH_SECTIONS.map((letter, idx) => {
+                            const activeList = getActiveSections(alarmSettings);
+                            const isActive = activeList.includes(letter);
+                            return (
+                              <button
+                                key={letter}
+                                type="button"
+                                onClick={() => {
+                                  let updated: string[];
+                                  if (isActive) {
+                                    if (activeList.length <= 1) {
+                                      alert("پێویستە بەلایەنی کەم یەک هۆبە هەبێت!");
+                                      return;
+                                    }
+                                    updated = activeList.filter(l => l !== letter);
+                                  } else {
+                                    updated = [...activeList, letter];
+                                  }
+                                  setAlarmSettings(prev => ({ ...prev, customSections: updated, customSectionsCount: updated.length }));
+                                }}
+                                className={`p-2.5 rounded-2xl border-2 transition-all flex flex-col items-center justify-center relative active:scale-95 ${
+                                  isActive
+                                    ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
+                                    : 'bg-slate-50 hover:bg-slate-100 text-slate-500 border-slate-200'
+                                }`}
+                              >
+                                <span className="text-base font-black">{letter}</span>
+                                <span className="text-[9px] font-bold opacity-70 mt-0.5">{idx + 1}</span>
+                                {isActive && (
+                                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-yellow-300" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* SECTION 4: ADD CUSTOM SECTION LETTER OR CODE */}
+                      <div className="p-5 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-3">
+                        <h4 className="font-black text-xs text-slate-800">زیادکردنی ناوی هۆبەی تایبەت (Custom Section Name):</h4>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={adminCustomSectionInput}
+                            onChange={(e) => setAdminCustomSectionInput(e.target.value)}
+                            placeholder="پیت یان ناوی هۆبە بنووسە (بۆ نموونە: أ، A، ١، زانستی)..."
+                            className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-purple-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const val = adminCustomSectionInput.trim();
+                              if (!val) return;
+                              const currentList = getActiveSections(alarmSettings);
+                              if (currentList.includes(val)) {
+                                alert("ئەم هۆبەیە پێشتر هەیە!");
+                                return;
+                              }
+                              const updated = [...currentList, val];
+                              setAlarmSettings(prev => ({ ...prev, customSections: updated, customSectionsCount: updated.length }));
+                              setAdminCustomSectionInput('');
+                            }}
+                            className="px-5 py-3 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-black shadow-xs active:scale-95 transition-all"
+                          >
+                            + زیادکردن
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* SECTION 5: LIVE PREVIEW */}
+                      <div className="p-5 bg-purple-50/60 rounded-3xl border border-purple-200 space-y-3">
+                        <div className="flex items-center justify-between border-b border-purple-200/60 pb-2">
+                          <span className="font-black text-xs text-purple-950">پێشبینینی ڕاستەوخۆ (Live Preview):</span>
+                          <span className="text-[11px] font-bold text-purple-700">
+                            {getActiveSections(alarmSettings).length} هۆبە ئامادەن
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {getActiveSections(alarmSettings).map((sec) => (
+                            <span
+                              key={sec}
+                              className="px-3 py-1 rounded-xl bg-white border border-purple-300 text-purple-900 text-xs font-black shadow-2xs"
+                            >
+                              هۆبەیا ({sec})
+                            </span>
+                          ))}
+                        </div>
+                        <p className="text-[11px] text-slate-500 font-medium pt-1">
+                          📌 نموونەی پۆلەکان: {getActiveSections(alarmSettings).slice(0, 4).map(s => `پۆلا ١٠ - ${s}`).join('، ')} ...
+                        </p>
+                      </div>
+
+                      {/* MASTER SAVE & BROADCAST BUTTON */}
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const activeList = getActiveSections(alarmSettings);
+                            handleAdminSaveMasterSettings({
+                              ...alarmSettings,
+                              customSections: activeList,
+                              customSectionsCount: activeList.length
+                            });
+                          }}
+                          disabled={adminSavingSettings}
+                          className="w-full py-4 rounded-2xl bg-purple-600 hover:bg-purple-700 active:scale-[0.98] text-white font-black text-sm shadow-xl flex items-center justify-center gap-3 transition-all disabled:opacity-50"
+                        >
+                          {adminSavingSettings ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5 text-yellow-300" />}
+                          <span>💾 پاشکەفتن و بەڵاڤکرنی پیتێن هۆبان بۆ هەمووان د Firebase دا (Save & Broadcast)</span>
                         </button>
                       </div>
                     </div>
@@ -6839,6 +7538,48 @@ const App: React.FC = () => {
         </div>
       </div>
 
+      {/* Teacher Saved / Change Request Offline & Online Feedback Notification */}
+      {teacherSubmittedStatus && (
+        <div className="max-w-5xl mx-auto px-3 sm:px-4 pt-2 no-print">
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-emerald-600 text-white font-black text-xs shadow-lg flex items-center justify-between gap-3 animate-in slide-in-from-top duration-300">
+            <div className="flex items-center gap-2.5">
+              <CheckCircle className="w-5 h-5 text-yellow-300 shrink-0" />
+              <span>{teacherSubmittedStatus}</span>
+            </div>
+            <button
+              onClick={() => setTeacherSubmittedStatus(null)}
+              className="p-1 hover:bg-white/20 rounded-lg text-white transition-all"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Pending Admin Review Banner for the Current Teacher */}
+      {changeRequests.some(r => (r.teacherId === selectedTeacherId || r.teacherName === teacherName) && r.status === 'pending') && (
+        <div className="max-w-5xl mx-auto px-3 sm:px-4 pt-2 no-print">
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 text-amber-950 font-bold text-xs shadow-xs flex items-center justify-between gap-3 animate-in fade-in">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-amber-200 text-amber-900 rounded-xl shrink-0">
+                <Clock className="w-4 h-4 text-amber-700 animate-spin" />
+              </div>
+              <div>
+                <span className="font-black text-amber-900 block">
+                  📌 داخوازییا دەستکاریا خشتەیێ تە ڕەوانەی ئەدمین کراوە (چاوەڕوانی پەسەندکردنە):
+                </span>
+                <span className="text-[11px] text-amber-800 font-medium">
+                  خشتەکەت لەسەر ئەم ئامێرە ١٠٠٪ ئۆفلاین کاردەکات و دەستکارییەکانت ماونەتەوە. کاتێک ئەدمین پەسەندی بکات، ل هەموو جەتوەلان بەڵاڤ دەبێت.
+                </span>
+              </div>
+            </div>
+            <span className="shrink-0 px-2.5 py-1 bg-amber-200/90 text-amber-950 rounded-full font-black text-[10px]">
+              ⏳ چاوەڕوانی ئەدمین
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* VIEW: LIVE MODE */}
       {viewMode === 'live' ? (
         <main className="max-w-5xl mx-auto px-4 pt-8 animate-in fade-in duration-300 flex flex-col items-center justify-center min-h-[75vh] gap-8">
@@ -6968,34 +7709,38 @@ const App: React.FC = () => {
         <main className="max-w-5xl mx-auto px-4 pt-6 animate-in fade-in duration-300">
           {/* Days bar */}
           <div className="flex overflow-x-auto pb-3 gap-2.5 no-scrollbar scroll-smooth no-print">
-            {DAYS.map((day) => (
-              <button
-                key={day}
-                onClick={() => setActiveDay(day)}
-                className={`flex-shrink-0 min-w-[120px] px-5 py-4 rounded-2xl text-xs font-black transition-all border-2 ${
-                  activeDay === day
-                    ? 'bg-white text-slate-900 shadow-lg -translate-y-0.5'
-                    : 'bg-white border-slate-100 text-slate-400 hover:border-slate-200'
-                }`}
-                style={{ borderColor: activeDay === day ? 'var(--primary-color)' : '' }}
-              >
-                {day}
-                <div
-                  className={`flex items-center justify-center gap-1 mt-1.5 px-2 py-0.5 rounded-full text-[9px] w-fit mx-auto ${
-                    schedule[day]?.shift === 'morning'
-                      ? 'bg-orange-50 text-orange-600'
-                      : 'bg-indigo-50 text-indigo-600'
+            {DAYS.map((day) => {
+              const dayShift = getDayShift(day, schedule, alarmSettings);
+              const isMorning = dayShift === 'morning';
+              return (
+                <button
+                  key={day}
+                  onClick={() => setActiveDay(day)}
+                  className={`flex-shrink-0 min-w-[120px] px-5 py-4 rounded-2xl text-xs font-black transition-all border-2 ${
+                    activeDay === day
+                      ? 'bg-white text-slate-900 shadow-lg -translate-y-0.5'
+                      : 'bg-white border-slate-100 text-slate-400 hover:border-slate-200'
                   }`}
+                  style={{ borderColor: activeDay === day ? 'var(--primary-color)' : '' }}
                 >
-                  {schedule[day]?.shift === 'morning' ? (
-                    <Sun className="w-2.5 h-2.5" />
-                  ) : (
-                    <Moon className="w-2.5 h-2.5" />
-                  )}
-                  <span>{schedule[day]?.shift === 'morning' ? 'سپێدە' : 'هێڤاری'}</span>
-                </div>
-              </button>
-            ))}
+                  {day}
+                  <div
+                    className={`flex items-center justify-center gap-1 mt-1.5 px-2 py-0.5 rounded-full text-[9px] w-fit mx-auto ${
+                      isMorning
+                        ? 'bg-orange-50 text-orange-600'
+                        : 'bg-indigo-50 text-indigo-600'
+                    }`}
+                  >
+                    {isMorning ? (
+                      <Sun className="w-2.5 h-2.5" />
+                    ) : (
+                      <Moon className="w-2.5 h-2.5" />
+                    )}
+                    <span>{isMorning ? 'سپێدە' : 'نیڤڕۆ'}</span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
 
           {/* Active day section */}
@@ -7006,18 +7751,21 @@ const App: React.FC = () => {
                   <div className="w-1.5 h-7 rounded-full" style={{ backgroundColor: 'var(--primary-color)' }} />
                   وانێن روژا {activeDay}
                 </h2>
-                <p className="text-[11px] text-slate-500 font-bold mt-0.5">
-                  دەوام: {schedule[activeDay]?.shift === 'morning' ? 'سپێدە' : 'هێڤاری'} (
-                  {schedule[activeDay]?.shift === 'morning'
-                    ? alarmSettings.morningDuration
-                    : alarmSettings.eveningDuration}{' '}
-                  خولەک)
-                  {alarmSettings.examSettings?.enabled && (
-                    <span className="mr-2 text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full text-[10px]">
-                      ئیمتیحان: دەرسا {alarmSettings.examSettings.examLessonNumber}
-                    </span>
-                  )}
-                </p>
+                {(() => {
+                  const activeShift = getDayShift(activeDay, schedule, alarmSettings);
+                  const isMorning = activeShift === 'morning';
+                  const duration = isMorning ? alarmSettings.morningDuration : alarmSettings.eveningDuration;
+                  return (
+                    <p className="text-[11px] text-slate-500 font-bold mt-0.5">
+                      دەوام: {isMorning ? 'سپێدە' : 'نیڤڕۆ'} ({duration} خولەک)
+                      {alarmSettings.examSettings?.enabled && (
+                        <span className="mr-2 text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full text-[10px]">
+                          ئیمتیحان: دەرسا {alarmSettings.examSettings.examLessonNumber} (40 خولەک)
+                        </span>
+                      )}
+                    </p>
+                  );
+                })()}
               </div>
 
               <div className="flex items-center gap-2">
@@ -7152,8 +7900,8 @@ const App: React.FC = () => {
                               className="text-xs border border-slate-200 bg-white rounded-xl p-2 font-bold outline-none"
                               defaultValue=""
                             >
-                              <option value="" disabled>هۆبە (أ، ب، ج...)</option>
-                              {SECTIONS.map((sec) => (
+                              <option value="" disabled>هۆبە (پیتێن دەستنیشانکری)</option>
+                              {getActiveSections(alarmSettings).map((sec) => (
                                 <option key={sec} value={sec}>هۆبە: {sec}</option>
                               ))}
                             </select>
@@ -7212,13 +7960,14 @@ const App: React.FC = () => {
 
                         <button
                           onClick={() => {
-                            saveToLocal();
+                            handleTeacherSaveAndSubmitChange(schedule);
                             setEditingSlotId(null);
                           }}
-                          className="w-full text-white py-2.5 rounded-xl text-xs font-black shadow-md active:scale-95 transition-all"
+                          className="w-full text-white py-2.5 rounded-xl text-xs font-black shadow-md active:scale-95 transition-all flex items-center justify-center gap-1.5"
                           style={{ backgroundColor: 'var(--primary-color)' }}
                         >
-                          پاشکەفتن
+                          <Save className="w-4 h-4" />
+                          <span>پاشکەفتن (خەزنکرنا ئۆفلاین + ناردن بۆ ئەدمین)</span>
                         </button>
                       </div>
                     ) : (
@@ -7337,165 +8086,216 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-white p-2 shadow-2xl border-[8px] border-slate-100 rounded-3xl overflow-x-auto">
-            <table
-              className="w-full border-collapse border-[3px] text-center min-w-[850px]"
-              style={{ borderColor: 'var(--primary-color)' }}
-            >
-              <thead>
-                <tr className="bg-white">
-                  <th
-                    colSpan={(alarmSettings.lessonCount || 6) + 2}
-                    className="p-5 text-2xl font-black text-slate-800 border-b-[3px] tracking-wide"
-                    style={{ borderColor: 'var(--primary-color)' }}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-4 px-2">
-                      <div className="text-right">
-                        <span>جەتوەلا وانێن {teacherSubject} - {teacherName}</span>
-                        <div className="text-xs text-slate-400 font-bold mt-1">
-                          {alarmSettings.lessonCount || 6} دەرس | سپێدە {alarmSettings.morningDuration} خولەک | هێڤاری {alarmSettings.eveningDuration} خولەک
-                        </div>
-                      </div>
+          {/* Table Header Bar & Mobile Fit / Theme Controls */}
+          <div className="bg-white p-3 sm:p-5 shadow-xl border border-slate-200/80 rounded-3xl space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3 border-slate-100">
+              <div className="text-right">
+                <h2 className="text-base sm:text-xl font-black text-slate-800 flex items-center gap-2">
+                  <LayoutGrid className="w-5 h-5 text-indigo-600" />
+                  <span>جەتوەلا وانێن {teacherSubject} - {teacherName}</span>
+                </h2>
+                <div className="text-[11px] sm:text-xs text-slate-500 font-bold mt-0.5">
+                  {alarmSettings.lessonCount || 6} دەرس | سپێدە {alarmSettings.morningDuration} خولەک | هێڤاری {alarmSettings.eveningDuration} خولەک
+                </div>
+              </div>
 
-                      <div className="flex items-center gap-2 no-print">
-                        <button
-                          onClick={() => setShowAiImportModal(true)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-black border border-indigo-200 shadow-sm transition-all"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                          <span>Gemini AI</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            setSettingsActiveTab('timing');
-                            setShowSettingsModal(true);
-                          }}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold border border-orange-200 shadow-sm transition-all"
-                        >
-                          <Clock className="w-3.5 h-3.5 text-orange-600" />
-                          <span>وەختێ دەرسان</span>
-                        </button>
-                        <button
-                          onClick={() => window.print()}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 shadow-sm transition-all"
-                        >
-                          <span>چاپکرن (Print)</span>
-                        </button>
-                      </div>
-                    </div>
-                  </th>
-                </tr>
-                <tr className="bg-slate-50 border-b-[3px] text-slate-600" style={{ borderColor: 'var(--primary-color)' }}>
-                  <th className="p-3 border-l-[3px] w-24 text-base font-black" style={{ borderColor: 'var(--primary-color)' }}>
-                    ڕۆژ
-                  </th>
-                  <th className="p-3 border-l-[3px] w-24 text-sm font-black" style={{ borderColor: 'var(--primary-color)' }}>
-                    دەوام
-                  </th>
-                  {Array.from({ length: alarmSettings.lessonCount || 6 }).map((_, i) => (
-                    <th
-                      key={i}
-                      className="p-3 border-l-[3px] font-black text-lg"
-                      style={{ borderColor: 'var(--primary-color)' }}
-                    >
-                      {i + 1}
-                      {alarmSettings.examSettings?.enabled && alarmSettings.examSettings.examLessonNumber === i + 1 && (
-                        <div className="text-[10px] font-black text-purple-700">ئیمتیحان 📝</div>
-                      )}
+              {/* Action Buttons & Mobile Screen Fit Toggle */}
+              <div className="flex flex-wrap items-center gap-2 no-print">
+                <button
+                  onClick={() => {
+                    const next = !fitMobileScreen;
+                    setFitMobileScreen(next);
+                    localStorage.setItem('fit_mobile_screen', JSON.stringify(next));
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black border transition-all active:scale-95 ${
+                    fitMobileScreen
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                      : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                  }`}
+                  title="گونجاندنا خشتەیی بۆ سەر شاشەیا مۆبایلێ"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>{fitMobileScreen ? '📱 د ئێک شاشەدا (Fit Screen)' : '↔️ شێوازێ پان (Scroll)'}</span>
+                </button>
+
+                {/* Soft Pastel Theme Switcher */}
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-[11px] font-bold">
+                  <span className="text-slate-500 hidden sm:inline px-1">رەنگێن پاستێل:</span>
+                  <button
+                    onClick={() => { setTablePastelTheme('rose'); localStorage.setItem('table_pastel_theme', 'rose'); }}
+                    className={`px-2 py-0.5 rounded-lg font-bold transition-all ${tablePastelTheme === 'rose' ? 'bg-rose-500 text-white font-black shadow-xs' : 'text-slate-600 hover:bg-slate-200'}`}
+                  >
+                    🌸 گوڵی
+                  </button>
+                  <button
+                    onClick={() => { setTablePastelTheme('indigo'); localStorage.setItem('table_pastel_theme', 'indigo'); }}
+                    className={`px-2 py-0.5 rounded-lg font-bold transition-all ${tablePastelTheme === 'indigo' ? 'bg-indigo-600 text-white font-black shadow-xs' : 'text-slate-600 hover:bg-slate-200'}`}
+                  >
+                    💜 بنەوشەیی
+                  </button>
+                  <button
+                    onClick={() => { setTablePastelTheme('emerald'); localStorage.setItem('table_pastel_theme', 'emerald'); }}
+                    className={`px-2 py-0.5 rounded-lg font-bold transition-all ${tablePastelTheme === 'emerald' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-600 hover:bg-slate-200'}`}
+                  >
+                    🌿 سەوز
+                  </button>
+                  <button
+                    onClick={() => { setTablePastelTheme('amber'); localStorage.setItem('table_pastel_theme', 'amber'); }}
+                    className={`px-2 py-0.5 rounded-lg font-bold transition-all ${tablePastelTheme === 'amber' ? 'bg-amber-500 text-white font-black shadow-xs' : 'text-slate-600 hover:bg-slate-200'}`}
+                  >
+                    ☀️ زێڕینی
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => setShowAiImportModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-black border border-indigo-200 shadow-xs transition-all"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                  <span className="hidden sm:inline">Gemini AI</span>
+                </button>
+
+                <button
+                  onClick={() => window.print()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 shadow-xs transition-all"
+                >
+                  <span>چاپ (Print)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Table Color Legend Banner */}
+            <div className="flex flex-wrap items-center justify-between text-[11px] font-bold text-slate-600 px-1 pt-1 gap-2">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <span className={`w-3.5 h-3.5 rounded-md border ${
+                    tablePastelTheme === 'rose'
+                      ? 'bg-rose-100 border-rose-300'
+                      : tablePastelTheme === 'emerald'
+                      ? 'bg-emerald-100 border-emerald-300'
+                      : tablePastelTheme === 'amber'
+                      ? 'bg-amber-100 border-amber-300'
+                      : 'bg-indigo-100 border-indigo-300'
+                  }`} />
+                  <span className="text-slate-700 font-extrabold">وانێن هەی (درس دار):</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3.5 h-3.5 rounded-md bg-slate-100 border border-slate-300" />
+                  <span className="text-slate-500 font-medium">بێ وانە (بەتاڵ / فەراغ):</span>
+                </div>
+              </div>
+              <span className="text-[10px] text-slate-400">💡 کلیک ل هەر وانەیەکێ بکە بۆ دەستکاریکرنێ</span>
+            </div>
+
+            {/* Main Schedule Matrix Table (Mobile Screen-Fitting Layout) */}
+            <div className={`w-full transition-all ${
+              fitMobileScreen ? 'overflow-hidden' : 'overflow-x-auto'
+            }`}>
+              <table className={`w-full text-center border-collapse ${
+                fitMobileScreen ? 'table-fixed min-w-0' : 'min-w-[750px]'
+              }`}>
+                <thead>
+                  <tr className="bg-slate-100/90 text-slate-800 border-b-2 border-slate-200 text-xs font-black">
+                    <th className="p-1 sm:p-2.5 border-l border-slate-200 w-[18%] sm:w-[14%]">
+                      <span>ڕۆژ</span>
                     </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {DAYS.map((day) => (
-                  <tr
-                    key={day}
-                    className="border-b-[3px] h-32 group hover:bg-slate-50/70 transition-all"
-                    style={{ borderColor: 'var(--primary-color)' }}
-                  >
-                    <td
-                      className="p-2 border-l-[3px] font-black text-base bg-slate-50"
-                      style={{ borderColor: 'var(--primary-color)' }}
-                    >
-                      {day}
-                    </td>
-                    <td
-                      className="p-2 border-l-[3px] text-xs font-bold relative"
-                      style={{ borderColor: 'var(--primary-color)' }}
-                    >
-                      <div className="flex flex-col items-center gap-1">
-                        {schedule[day]?.shift === 'morning' ? (
-                          <Sun className="w-4 h-4 text-orange-500" />
-                        ) : (
-                          <Moon className="w-4 h-4 text-indigo-500" />
-                        )}
-                        <span>{schedule[day]?.shift === 'morning' ? 'سپێدە' : 'هێڤاری'}</span>
-                      </div>
-                      <button
-                        onClick={() => toggleDayShift(day)}
-                        className="absolute bottom-1 right-1 p-1 bg-white text-slate-500 rounded-lg opacity-0 group-hover:opacity-100 border border-slate-200 shadow-sm transition-all hover:scale-105"
-                        title="گوهۆڕینا دەوامێ"
-                      >
-                        <ArrowLeftRight className="w-3 h-3" />
-                      </button>
-                    </td>
-
-                    {(schedule[day]?.slots || []).map((slot, i) => {
-                      const status = getSlotStatus(slot.startTime, slot.endTime);
-                      let cellBg = '';
-                      if (status === 'finished') cellBg = 'bg-red-500/10';
-                      else if (status === 'active') cellBg = 'bg-green-500/10';
-                      else if (status === 'upcoming') cellBg = 'bg-yellow-400/20';
-
-                      return (
-                        <td
-                          key={slot.id || i}
-                          className={`p-2 border-l-[3px] relative cursor-pointer ${cellBg}`}
-                          style={{ borderColor: 'var(--primary-color)' }}
-                          onClick={() => {
-                            setActiveDay(day);
-                            setViewMode('modern');
-                            setEditingSlotId(slot.id);
-                          }}
-                        >
-                          {slot.className !== 'بێ وانە' ? (
-                            <div className="flex flex-col items-center justify-center p-1">
-                              <div
-                                className={`text-2xl font-black ${
-                                  status === 'finished'
-                                    ? 'text-red-600'
-                                    : status === 'active'
-                                    ? 'text-green-600'
-                                    : 'text-slate-800'
-                                }`}
-                              >
-                                {slot.className}
-                              </div>
-                              <div
-                                className="text-[10px] font-black absolute top-2 right-2 opacity-80 bg-slate-100 px-1.5 py-0.5 rounded-md"
-                                style={{ color: 'var(--primary-color)' }}
-                              >
-                                {slot.subject || 'کیمیا'}
-                              </div>
-                              <div className="text-[11px] text-slate-400 mt-1 font-mono tabular-nums bg-white/70 px-2 py-0.5 rounded-full border border-slate-100">
-                                {slot.startTime}
-                              </div>
-                              {status === 'active' && (
-                                <div className="absolute top-2 left-2 w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
-                              )}
-                            </div>
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                              <Plus className="w-6 h-6 text-slate-300" />
-                            </div>
+                    {Array.from({ length: alarmSettings.lessonCount || 6 }).map((_, i) => (
+                      <th key={i} className="p-1 sm:p-2.5 border-l border-slate-200 font-black text-xs sm:text-base text-slate-800">
+                        <div className="flex flex-col items-center justify-center">
+                          <span>{i + 1}</span>
+                          {alarmSettings.examSettings?.enabled && alarmSettings.examSettings.examLessonNumber === i + 1 && (
+                            <span className="text-[7px] sm:text-[9px] font-black text-purple-800 bg-purple-100 px-1 rounded">ئیمتیحان</span>
                           )}
-                        </td>
-                      );
-                    })}
+                        </div>
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {DAYS.map((day) => {
+                    const shift = getDayShift(day, schedule, alarmSettings);
+                    const isMorning = shift === 'morning';
+                    return (
+                      <tr key={day} className="border-b border-slate-200 hover:bg-slate-50/50 transition-all">
+                        {/* Day & Shift cell */}
+                        <td className="p-1 sm:p-2 border-l border-slate-200 font-black bg-slate-50 text-[10px] sm:text-sm text-slate-800">
+                          <div className="flex flex-col items-center justify-center gap-0.5 sm:gap-1">
+                            <span className="leading-tight">{day}</span>
+                            <span className={`text-[8px] sm:text-[10px] font-extrabold px-1.5 py-0.2 rounded-full flex items-center gap-0.5 ${
+                              isMorning ? 'bg-amber-100/90 text-amber-900' : 'bg-indigo-100/90 text-indigo-900'
+                            }`}>
+                              {isMorning ? <Sun className="w-2.5 h-2.5 text-amber-600 shrink-0" /> : <Moon className="w-2.5 h-2.5 text-indigo-600 shrink-0" />}
+                              <span className="hidden sm:inline">{isMorning ? 'سپێدە' : 'نیڤڕۆ'}</span>
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Periods Cells */}
+                        {(schedule[day]?.slots || []).map((slot, i) => {
+                          const isFilled = slot.className && slot.className !== 'بێ وانە' && slot.className !== 'فەراغ';
+                          const status = getSlotStatus(slot.startTime, slot.endTime);
+
+                          // Pastel theme styles for filled vs empty
+                          let slotStyle = '';
+                          if (isFilled) {
+                            if (status === 'active') {
+                              slotStyle = 'bg-emerald-100/95 text-emerald-950 border-2 border-emerald-500 font-black shadow-md ring-2 ring-emerald-300';
+                            } else if (status === 'finished') {
+                              slotStyle = 'bg-slate-100 text-slate-500 border border-slate-200/80 opacity-70';
+                            } else if (tablePastelTheme === 'rose') {
+                              slotStyle = 'bg-rose-50/90 text-rose-950 border border-rose-200/90 shadow-[0_1px_4px_rgba(244,63,94,0.06)] hover:bg-rose-100';
+                            } else if (tablePastelTheme === 'emerald') {
+                              slotStyle = 'bg-emerald-50/90 text-emerald-950 border border-emerald-200/90 shadow-[0_1px_4px_rgba(16,185,129,0.06)] hover:bg-emerald-100';
+                            } else if (tablePastelTheme === 'amber') {
+                              slotStyle = 'bg-amber-50/90 text-amber-950 border border-amber-200/90 shadow-[0_1px_4px_rgba(245,158,11,0.06)] hover:bg-amber-100';
+                            } else {
+                              // indigo default
+                              slotStyle = 'bg-indigo-50/90 text-indigo-950 border border-indigo-200/90 shadow-[0_1px_4px_rgba(99,102,241,0.06)] hover:bg-indigo-100';
+                            }
+                          } else {
+                            // EMPTY / FREE SLOT COLOR
+                            slotStyle = 'bg-slate-100/60 text-slate-400 border border-slate-200/60 hover:bg-slate-200/60';
+                          }
+
+                          return (
+                            <td
+                              key={slot.id || i}
+                              onClick={() => {
+                                setActiveDay(day);
+                                setViewMode('modern');
+                                setEditingSlotId(slot.id);
+                              }}
+                              className="p-0.5 sm:p-1.5 border-l border-slate-200 cursor-pointer transition-all"
+                            >
+                              <div className={`w-full h-full min-h-[46px] sm:min-h-[75px] p-1 rounded-xl flex flex-col items-center justify-center transition-all ${slotStyle}`}>
+                                {isFilled ? (
+                                  <>
+                                    <span className="text-[10px] sm:text-base md:text-lg font-black tracking-tight leading-tight">
+                                      {slot.className}
+                                    </span>
+                                    <span className="text-[7px] sm:text-[10px] font-bold opacity-80 mt-0.5 truncate max-w-full">
+                                      {slot.subject || teacherSubject}
+                                    </span>
+                                    <span className="text-[7px] sm:text-[9px] font-mono opacity-70 mt-0.5 hidden sm:inline-block">
+                                      {slot.startTime}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <div className="flex flex-col items-center justify-center text-[9px] sm:text-xs font-medium text-slate-400">
+                                    <span className="opacity-50">—</span>
+                                    <span className="text-[7px] sm:text-[9px] opacity-60">بێ وانە</span>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </main>
       )}
