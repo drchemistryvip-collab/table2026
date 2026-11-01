@@ -8234,27 +8234,31 @@ const App: React.FC = () => {
                         {(schedule[day]?.slots || []).map((slot, i) => {
                           const isFilled = slot.className && slot.className !== 'بێ وانە' && slot.className !== 'فەراغ';
                           const status = getSlotStatus(slot.startTime, slot.endTime);
+                          const isToday = day === getKurdishDayName(new Date());
 
                           // Pastel theme styles for filled vs empty
                           let slotStyle = '';
                           if (isFilled) {
-                            if (status === 'active') {
-                              slotStyle = 'bg-emerald-100/95 text-emerald-950 border-2 border-emerald-500 font-black shadow-md ring-2 ring-emerald-300';
-                            } else if (status === 'finished') {
-                              slotStyle = 'bg-slate-100 text-slate-500 border border-slate-200/80 opacity-70';
-                            } else if (tablePastelTheme === 'rose') {
-                              slotStyle = 'bg-rose-50/90 text-rose-950 border border-rose-200/90 shadow-[0_1px_4px_rgba(244,63,94,0.06)] hover:bg-rose-100';
+                            let baseTheme = '';
+                            if (tablePastelTheme === 'rose') {
+                              baseTheme = 'bg-pink-100/90 text-rose-950 border border-pink-300/90 shadow-xs hover:bg-pink-200/90';
                             } else if (tablePastelTheme === 'emerald') {
-                              slotStyle = 'bg-emerald-50/90 text-emerald-950 border border-emerald-200/90 shadow-[0_1px_4px_rgba(16,185,129,0.06)] hover:bg-emerald-100';
+                              baseTheme = 'bg-emerald-100/90 text-emerald-950 border border-emerald-300/90 shadow-xs hover:bg-emerald-200/90';
                             } else if (tablePastelTheme === 'amber') {
-                              slotStyle = 'bg-amber-50/90 text-amber-950 border border-amber-200/90 shadow-[0_1px_4px_rgba(245,158,11,0.06)] hover:bg-amber-100';
+                              baseTheme = 'bg-amber-100/90 text-amber-950 border border-amber-300/90 shadow-xs hover:bg-amber-200/90';
                             } else {
                               // indigo default
-                              slotStyle = 'bg-indigo-50/90 text-indigo-950 border border-indigo-200/90 shadow-[0_1px_4px_rgba(99,102,241,0.06)] hover:bg-indigo-100';
+                              baseTheme = 'bg-indigo-100/90 text-indigo-950 border border-indigo-300/90 shadow-xs hover:bg-indigo-200/90';
+                            }
+
+                            if (status === 'active' && isToday) {
+                              slotStyle = `${baseTheme} ring-2 ring-emerald-500 font-black animate-pulse shadow-md`;
+                            } else {
+                              slotStyle = baseTheme;
                             }
                           } else {
                             // EMPTY / FREE SLOT COLOR
-                            slotStyle = 'bg-slate-100/60 text-slate-400 border border-slate-200/60 hover:bg-slate-200/60';
+                            slotStyle = 'bg-slate-100/70 text-slate-400 border border-dashed border-slate-300/80 hover:bg-slate-200/70';
                           }
 
                           return (
