@@ -25,8 +25,8 @@ export const VOICE_SCRIPTS: Record<string, string> = {
 export const calculateSlotTimes = (
   shift: ShiftType,
   settings: AlarmSettings
-): { start: string; end: string; isExam: boolean }[] => {
-  const times: { start: string; end: string; isExam: boolean }[] = [];
+): { start: string; end: string; isExam: boolean; lessonLabel?: string }[] => {
+  const times: { start: string; end: string; isExam: boolean; lessonLabel?: string }[] = [];
   const baseTimeStr = shift === 'morning' ? settings.morningStartTime : settings.eveningStartTime;
   const [baseH, baseM] = (baseTimeStr || (shift === 'morning' ? "08:00" : "12:30")).split(':').map(Number);
 
@@ -61,17 +61,37 @@ export const calculateSlotTimes = (
     times.push({
       start: startStr,
       end: endStr,
-      isExam: false
+      isExam: false,
+      lessonLabel: `وانا ${lessonIndex}`
     });
 
     // Handle post-lesson intervals:
-    // If Exam is enabled and this is the exam insertion point (after Lesson 1):
+    // If Exam is enabled and this is the exam insertion point (e.g. after Lesson 1):
     const examTargetLesson = exam?.examLessonNumber || 1;
     if (isExamDay && lessonIndex === examTargetLesson) {
-      // Add exam duration (40 mins) + break after exam
+      // Insertion point for Exam slot
+      
+      const examStartH = Math.floor(currentMinutes / 60) % 24;
+      const examStartM = currentMinutes % 60;
+      const examStartStr = `${examStartH.toString().padStart(2, '0')}:${examStartM.toString().padStart(2, '0')}`;
+
       const examMins = exam.examDuration || 40;
+      currentMinutes += examMins;
+
+      const examEndH = Math.floor(currentMinutes / 60) % 24;
+      const examEndM = currentMinutes % 60;
+      const examEndStr = `${examEndH.toString().padStart(2, '0')}:${examEndM.toString().padStart(2, '0')}`;
+
+      times.push({
+        start: examStartStr,
+        end: examEndStr,
+        isExam: true,
+        lessonLabel: "ئیمتیحان"
+      });
+
+      // Break AFTER exam
       const breakAfterExam = exam.breakAfterExam !== undefined ? exam.breakAfterExam : 10;
-      currentMinutes += examMins + breakAfterExam;
+      currentMinutes += breakAfterExam;
     } else if (lessonIndex < count) {
       // Normal break between lessons
       let breakDuration = settings.defaultBreakDuration || 5;
@@ -95,25 +115,33 @@ export const generateSlotsForDay = (
   subjectName: string = 'کیمیا'
 ): LessonSlot[] => {
   const times = calculateSlotTimes(shift, settings);
-  const count = settings.lessonCount || 6;
   const slots: LessonSlot[] = [];
-
-  for (let i = 0; i < count; i++) {
-    const timeInfo = times[i] || { start: "08:00", end: "08:35", isExam: false };
-    const rawClass = classesPerLesson[i] || 'بێ وانە';
+  
+  let lessonClassIdx = 0;
+  for (let i = 0; i < times.length; i++) {
+    const timeInfo = times[i];
+    
+    let className = 'بێ وانە';
+    if (timeInfo.isExam) {
+      className = 'ئیمتیحان 📝';
+    } else {
+      className = classesPerLesson[lessonClassIdx] || 'بێ وانە';
+      lessonClassIdx++;
+    }
     
     slots.push({
       id: `slot_${shift}_${i}_${Math.random().toString(36).substring(2, 7)}`,
       lessonNumber: i + 1,
       startTime: timeInfo.start,
       endTime: timeInfo.end,
-      className: rawClass,
-      subject: subjectName || 'کیمیا',
+      className: className,
+      subject: timeInfo.isExam ? 'ئیمتیحان' : (subjectName || 'کیمیا'),
       isExam: timeInfo.isExam
     });
   }
   return slots;
 };
+
 
 /**
  * Shift Schedule matching the user requirement:

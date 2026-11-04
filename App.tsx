@@ -355,7 +355,9 @@ import {
   CheckSquare,
   Code,
   Copy,
-  Menu
+  Menu,
+  PenTool,
+  Timer
 } from 'lucide-react';
 
 
@@ -473,29 +475,41 @@ export const reconcileScheduleWithDayShifts = (
     const targetShift = getDayShift(dayName, sched, settings);
     const times = calculateSlotTimes(targetShift, settings);
     const existingSlots = existingDay?.slots || [];
-    const count = settings.lessonCount || 6;
     const newSlots: LessonSlot[] = [];
 
-    for (let i = 0; i < count; i++) {
-      const t = times[i] || { 
-        start: targetShift === 'morning' ? (settings.morningStartTime || "08:00") : (settings.eveningStartTime || "12:30"), 
-        end: targetShift === 'morning' ? "08:35" : "13:00", 
-        isExam: false 
-      };
-      const ex = existingSlots[i];
-      const fallbackSubject = teacherSubjectParam || 'کیمیا';
-      const slotSub = (ex && ex.subject && ex.subject !== 'کیمیا') ? ex.subject : fallbackSubject;
+    const nonExamSlots = existingSlots.filter(s => !s.isExam);
+    let nonExamIdx = 0;
+    for (let i = 0; i < times.length; i++) {
+      const t = times[i];
+      
+      let className = 'بێ وانە';
+      let subject = teacherSubjectParam || 'کیمیا';
+      let slotId = `slot_${dayName}_${i}_${Math.random().toString(36).substring(2, 6)}`;
+
+      if (t.isExam) {
+        className = 'ئیمتیحان 📝';
+        subject = 'ئیمتیحان';
+      } else {
+        const ex = nonExamSlots[nonExamIdx];
+        if (ex) {
+          className = ex.className || 'بێ وانە';
+          subject = (ex.subject && ex.subject !== 'کیمیا') ? ex.subject : (teacherSubjectParam || 'کیمیا');
+          slotId = ex.id;
+        }
+        nonExamIdx++;
+      }
 
       newSlots.push({
-        id: ex ? ex.id : `slot_${dayName}_${i}_${Math.random().toString(36).substring(2, 6)}`,
+        id: slotId,
         lessonNumber: i + 1,
         startTime: t.start,
         endTime: t.end,
-        className: ex ? ex.className : 'بێ وانە',
-        subject: slotSub,
+        className: className,
+        subject: subject,
         isExam: t.isExam,
       });
     }
+
 
     reconciled[dayName] = {
       ...existingDay,
@@ -507,6 +521,7 @@ export const reconcileScheduleWithDayShifts = (
 
   return reconciled;
 };
+
 
 const DEFAULT_SEED_TEACHERS: TeacherTimetableDoc[] = [
   {
@@ -2790,6 +2805,31 @@ const App: React.FC = () => {
     }
   };
 
+// High-quality rounded rectangle drawing utility for Canvas 2D
+const drawRoundedRect = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number, fill: string, stroke?: string, strokeWidth = 2) => {
+  ctx.save();
+  ctx.beginPath();
+  if ((ctx as any).roundRect) {
+    (ctx as any).roundRect(x, y, w, h, r);
+  } else {
+    // Fallback for older browsers
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+  }
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = strokeWidth;
+    ctx.stroke();
+  }
+  ctx.restore();
+};
+
   // Lockscreen Wallpaper Render Function (HD 1080x1920)
   const renderWallpaperCanvas = () => {
     const canvas = wallpaperCanvasRef.current;
@@ -2838,25 +2878,28 @@ const App: React.FC = () => {
     const isLight = wallpaperTheme === 'white';
     const textColor = isLight ? '#0f172a' : '#ffffff';
     const subTextColor = isLight ? '#475569' : '#94a3b8';
-    const cardBg = isLight ? 'rgba(255, 255, 255, 0.85)' : 'rgba(255, 255, 255, 0.08)';
-    const cardBorder = isLight ? 'rgba(203, 213, 225, 0.8)' : 'rgba(255, 255, 255, 0.15)';
-    const accentColor = wallpaperTheme === 'emerald' ? '#34d399' : wallpaperTheme === 'amber' ? '#fbbf24' : '#818cf8';
+    const cardBg = isLight ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.06)';
+    const cardBorder = isLight ? 'rgba(203, 213, 225, 0.8)' : 'rgba(255, 255, 255, 0.12)';
+    const accentColor = wallpaperTheme === 'emerald' ? '#10b981' : wallpaperTheme === 'amber' ? '#f59e0b' : '#6366f1';
 
     // Header Title (optional)
     if (wallpaperShowHeader) {
       ctx.save();
       ctx.textAlign = 'center';
-      ctx.font = 'bold 30px Vazirmatn, sans-serif';
-      ctx.fillStyle = isLight ? '#64748b' : 'rgba(255, 255, 255, 0.4)';
-      ctx.fillText('⚡ جهـتوەلا من — شاشەیا قوفلێ', width / 2, 220);
-
-      ctx.font = '900 48px Vazirmatn, sans-serif';
-      ctx.fillStyle = textColor;
-      ctx.fillText(`${teacherName} — ${teacherSubject}`, width / 2, 280);
-
-      ctx.font = '700 28px Vazirmatn, sans-serif';
+      
+      // Top Small Badge
+      drawRoundedRect(ctx, width / 2 - 150, 150, 300, 45, 15, 'rgba(255, 255, 255, 0.08)', accentColor, 1.5);
+      ctx.font = 'bold 22px Vazirmatn, sans-serif';
       ctx.fillStyle = accentColor;
-      ctx.fillText('جەتوەلا وانێن قوتابخانێ (2026)', width / 2, 325);
+      ctx.fillText('⚡ خشتەیێ من — 2026', width / 2, 181);
+
+      ctx.font = '900 64px Vazirmatn, sans-serif';
+      ctx.fillStyle = textColor;
+      ctx.fillText(`م. ${teacherName}`, width / 2, 280);
+
+      ctx.font = '700 32px Vazirmatn, sans-serif';
+      ctx.fillStyle = subTextColor;
+      ctx.fillText(teacherSubject, width / 2, 335);
       ctx.restore();
     }
 
@@ -2873,71 +2916,74 @@ const App: React.FC = () => {
       const slots = todayData?.slots || [];
 
       ctx.save();
-      ctx.font = '900 38px Vazirmatn, sans-serif';
-      ctx.fillStyle = textColor;
+      ctx.font = '900 46px Vazirmatn, sans-serif';
+      ctx.fillStyle = accentColor;
       ctx.textAlign = 'center';
       const dayShift = getDayShift(activeDay, schedule, alarmSettings);
-      ctx.fillText(`📅 جەتوەلا ڕۆژا ${activeDay} (${dayShift === 'morning' ? 'سپێدە' : 'نیڤڕۆ'})`, width / 2, startY);
+      ctx.fillText(`📅 جەتوەلا ڕۆژا ${activeDay} (${dayShift === 'morning' ? 'سپێدە' : 'نیڤڕۆ'})`, width / 2, startY - 30);
       ctx.restore();
-
-      startY += 55;
 
       slots.forEach((slot, idx) => {
         const cardX = 80;
         const cardW = width - 160;
-        const cardH = 145;
+        const cardH = 170;
+        const isExam = slot.isExam;
 
         ctx.save();
-        ctx.beginPath();
-        if ((ctx as any).roundRect) (ctx as any).roundRect(cardX, startY, cardW, cardH, 28);
-        else ctx.rect(cardX, startY, cardW, cardH);
-        ctx.fillStyle = cardBg;
-        ctx.fill();
-        ctx.strokeStyle = cardBorder;
-        ctx.lineWidth = 2;
-        ctx.stroke();
+        // Modern card shadow effect
+        ctx.shadowColor = 'rgba(0,0,0,0.2)';
+        ctx.shadowBlur = 15;
+        ctx.shadowOffsetY = 8;
+        
+        drawRoundedRect(ctx, cardX, startY, cardW, cardH, 40, cardBg, isExam ? '#a855f7' : cardBorder, isExam ? 5 : 2);
+        ctx.shadowColor = 'transparent';
 
-        ctx.fillStyle = accentColor;
-        ctx.beginPath();
-        if ((ctx as any).roundRect) (ctx as any).roundRect(cardX + 25, startY + 25, 140, 95, 20);
-        else ctx.rect(cardX + 25, startY + 25, 140, 95);
-        ctx.fill();
-
-        ctx.fillStyle = isLight ? '#ffffff' : '#0f172a';
-        ctx.font = '900 34px Vazirmatn, sans-serif';
+        // Lesson Number / Exam Badge
+        const badgeColor = isExam ? '#a855f7' : accentColor;
+        drawRoundedRect(ctx, cardX + 30, startY + 35, 140, 100, 25, badgeColor, undefined);
+        
+        ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
-        ctx.fillText(`وانا ${idx + 1}`, cardX + 95, startY + 82);
+        if (isExam) {
+          ctx.font = '900 40px Vazirmatn, sans-serif';
+          ctx.fillText('📝', cardX + 100, startY + 85);
+          ctx.font = '900 22px Vazirmatn, sans-serif';
+          ctx.fillText('ئیمتیحان', cardX + 100, startY + 122);
+        } else {
+          ctx.font = '900 38px Vazirmatn, sans-serif';
+          ctx.fillText(`و ${idx + 1}`, cardX + 100, startY + 98);
+        }
 
         const isEmpty = !slot.className || slot.className === 'بێ وانە';
 
         if (!isEmpty) {
           ctx.textAlign = 'right';
           ctx.fillStyle = textColor;
-          ctx.font = '900 42px Vazirmatn, sans-serif';
-          const classNameStr = slot.className.startsWith('پۆلا') ? slot.className : `پۆلا ${slot.className}`;
-          ctx.fillText(classNameStr, cardX + cardW - 35, startY + 70);
+          ctx.font = '900 52px Vazirmatn, sans-serif';
+          const classNameStr = slot.className.replace('پۆلا ', '');
+          ctx.fillText(classNameStr, cardX + cardW - 40, startY + 85);
 
-          ctx.font = '700 28px Vazirmatn, sans-serif';
+          ctx.font = '700 32px Vazirmatn, sans-serif';
           ctx.fillStyle = subTextColor;
-          ctx.fillText(`${slot.subject || teacherSubject}  •  ⏰ ${slot.startTime} — ${slot.endTime}`, cardX + cardW - 35, startY + 118);
+          ctx.fillText(`${slot.subject || teacherSubject}  •  ⏰ ${slot.startTime} — ${slot.endTime}`, cardX + cardW - 40, startY + 138);
         } else {
           ctx.textAlign = 'right';
           ctx.fillStyle = subTextColor;
-          ctx.font = '700 28px Vazirmatn, sans-serif';
-          ctx.fillText(`⏰ ${slot.startTime} — ${slot.endTime} (بەتاڵ)`, cardX + cardW - 35, startY + 85);
+          ctx.font = '900 36px Vazirmatn, sans-serif';
+          ctx.fillText(`⏰ ${slot.startTime} — ${slot.endTime} (بێ وانە)`, cardX + cardW - 40, startY + 105);
         }
 
         ctx.restore();
-        startY += cardH + wallpaperSpacing;
+        startY += cardH + wallpaperSpacing + 10;
       });
 
     } else if (wallpaperMode === 'table') {
-      // FULL GRID LAYOUT (TABLE STYLE)
-      const tableX = 60;
+      // FULL GRID LAYOUT (APP STYLE TABLE)
+      const tableX = 50;
       const tableY = wallpaperTopY;
-      const tableW = width - 120;
-      const dayH = 220;
-      const dayGap = 20;
+      const tableW = width - 100;
+      const dayH = 260;
+      const dayGap = 25;
 
       DAYS.forEach((dayName, dIdx) => {
         const ry = tableY + dIdx * (dayH + dayGap);
@@ -2945,105 +2991,133 @@ const App: React.FC = () => {
         if (!dayData) return;
 
         ctx.save();
-        drawRoundedRect(tableX, ry, tableW, dayH, 24, cardBg, cardBorder, 2);
+        drawRoundedRect(ctx, tableX, ry, tableW, dayH, 45, cardBg, cardBorder, 2.5);
 
-        // Day Name on the right (RTL)
+        // Day Name Side Badge (Vertical-ish)
+        const dShift = getDayShift(dayName, schedule, alarmSettings);
+        const dColor = dShift === 'morning' ? '#f59e0b' : '#6366f1';
+        drawRoundedRect(ctx, tableX + tableW - 170, ry + 25, 145, dayH - 50, 32, dColor, undefined);
+        
         ctx.textAlign = 'center';
-        ctx.font = '900 34px Vazirmatn, sans-serif';
-        ctx.fillStyle = accentColor;
-        ctx.fillText(dayName.split(' ')[0], tableX + tableW - 80, ry + dayH / 2 + 10);
+        ctx.font = '900 38px Vazirmatn, sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(dayName.split(' ')[0], tableX + tableW - 97, ry + dayH / 2 + 15);
 
         const slots = dayData.slots || [];
         const slotsCount = slots.length || 6;
-        const totalWForSlots = tableW - 160 - 40;
-        const sW = (totalWForSlots - 10 * (slotsCount - 1)) / slotsCount;
+        const totalWForSlots = tableW - 200 - 40;
+        const sW = (totalWForSlots - 15 * (slotsCount - 1)) / slotsCount;
 
         slots.forEach((slot, sIdx) => {
           // RTL placement
           const rtlIndex = slotsCount - 1 - sIdx;
-          const sx = tableX + 20 + rtlIndex * (sW + 10);
+          const sx = tableX + 25 + rtlIndex * (sW + 15);
           const sy = ry + 25;
           const isEmpty = !slot.className || slot.className === 'بێ وانە';
+          const isExam = slot.isExam;
 
-          drawRoundedRect(sx, sy, sW, dayH - 50, 18, isEmpty ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.05)', cardBorder, 1);
+          const sFill = isExam ? 'rgba(168, 85, 247, 0.25)' : (isEmpty ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.05)');
+          const sStroke = isExam ? '#a855f7' : (isEmpty ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.15)');
+          
+          // Draw card
+          drawRoundedRect(ctx, sx, sy, sW, dayH - 50, 26, sFill, sStroke, isExam ? 4 : 1.5);
 
-          if (!isEmpty) {
+          if (isExam) {
+            // Draw a nice "Exam" icon/badge
+            ctx.save();
             ctx.textAlign = 'center';
-            ctx.font = '900 24px Vazirmatn, sans-serif';
-            ctx.fillStyle = textColor;
-            const shortClass = slot.className.replace('پۆلا ', '');
-            ctx.fillText(shortClass, sx + sW / 2, sy + dayH / 2 - 15);
+            ctx.fillStyle = '#a855f7';
+            ctx.font = '900 18px Vazirmatn, sans-serif';
+            ctx.fillText('ئیمتیحان', sx + sW / 2, sy + 35);
+            
+            // Draw a small document icon
+            const iconX = sx + sW / 2 - 12;
+            const iconY = sy + 45;
+            ctx.strokeStyle = '#a855f7';
+            ctx.lineWidth = 2.5;
+            ctx.strokeRect(iconX, iconY, 24, 30);
+            ctx.beginPath();
+            ctx.moveTo(iconX + 6, iconY + 10); ctx.lineTo(iconX + 18, iconY + 10);
+            ctx.moveTo(iconX + 6, iconY + 18); ctx.lineTo(iconX + 18, iconY + 18);
+            ctx.stroke();
+            ctx.restore();
+          }
 
-            ctx.font = '700 16px Vazirmatn, monospace';
+          if (!isEmpty && !isExam) {
+            ctx.textAlign = 'center';
+            ctx.fillStyle = textColor;
+            ctx.font = '900 34px Vazirmatn, sans-serif';
+            const shortClass = slot.className.replace('پۆلا ', '');
+            ctx.fillText(shortClass, sx + sW / 2, sy + dayH / 2 - 5);
+
+            ctx.font = '900 20px Vazirmatn, monospace';
             ctx.fillStyle = accentColor;
-            ctx.fillText(slot.startTime, sx + sW / 2, sy + dayH - 75);
+            ctx.fillText(slot.startTime, sx + sW / 2, sy + dayH - 85);
+          } else if (isExam) {
+            ctx.textAlign = 'center';
+            ctx.font = '900 22px Vazirmatn, monospace';
+            ctx.fillStyle = '#a855f7';
+            ctx.fillText(slot.startTime, sx + sW / 2, sy + dayH - 85);
           }
         });
         ctx.restore();
       });
     } else {
-      // Full Week View - Right To Left (RTL) Layout: Lesson 1 on far right, Lesson 6 on far left
+      // Full Week View (Card Style)
       DAYS.forEach((dayName) => {
         const dayData = schedule[dayName];
         if (!dayData) return;
 
         const cardX = 50;
         const cardW = width - 100;
-        const cardH = 200;
+        const cardH = 230;
 
         ctx.save();
-        ctx.beginPath();
-        if ((ctx as any).roundRect) (ctx as any).roundRect(cardX, startY, cardW, cardH, 24);
-        else ctx.rect(cardX, startY, cardW, cardH);
-        ctx.fillStyle = cardBg;
-        ctx.fill();
-        ctx.strokeStyle = cardBorder;
-        ctx.lineWidth = 2;
-        ctx.stroke();
+        drawRoundedRect(ctx, cardX, startY, cardW, cardH, 45, cardBg, cardBorder, 2);
 
         ctx.textAlign = 'right';
-        ctx.font = '900 34px Vazirmatn, sans-serif';
+        ctx.font = '900 40px Vazirmatn, sans-serif';
         ctx.fillStyle = accentColor;
-        ctx.fillText(`• ${dayName} (${dayData.shift === 'morning' ? 'سپێدە' : 'هێڤاری'})`, cardX + cardW - 25, startY + 48);
+        ctx.fillText(`• ${dayName} (${dayData.shift === 'morning' ? 'سپێدە' : 'هێڤاری'})`, cardX + cardW - 40, startY + 60);
 
         const slotCount = dayData.slots.length || 6;
-        const slotWidth = (cardW - 50) / slotCount;
+        const slotWidth = (cardW - 80) / slotCount;
 
         dayData.slots.forEach((slot, sIdx) => {
-          // RTL placement: sIdx = 0 (Lesson 1) gets placed at highest X index (far right)
+          // RTL placement
           const rtlIndex = slotCount - 1 - sIdx;
-          const sx = cardX + 25 + rtlIndex * slotWidth;
-          const sy = startY + 70;
+          const sx = cardX + 40 + rtlIndex * slotWidth;
+          const sy = startY + 90;
           const isEmpty = !slot.className || slot.className === 'بێ وانە';
+          const isExam = slot.isExam;
 
-          ctx.beginPath();
-          if ((ctx as any).roundRect) (ctx as any).roundRect(sx, sy, slotWidth - 10, 110, 16);
-          else ctx.rect(sx, sy, slotWidth - 10, 110);
-          ctx.fillStyle = isEmpty
-            ? (isLight ? 'rgba(226, 232, 240, 0.3)' : 'rgba(255, 255, 255, 0.02)')
-            : (isLight ? 'rgba(79, 70, 229, 0.12)' : 'rgba(99, 102, 241, 0.28)');
-          ctx.fill();
+          ctx.save();
+          if (isExam) {
+            drawRoundedRect(ctx, sx, sy, slotWidth - 15, 120, 24, 'rgba(168, 85, 247, 0.15)', '#a855f7', 2.5);
+          } else {
+            drawRoundedRect(ctx, sx, sy, slotWidth - 15, 120, 24, isEmpty ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.06)', 'rgba(255,255,255,0.1)', 1.5);
+          }
 
           if (!isEmpty) {
             ctx.textAlign = 'center';
-            ctx.fillStyle = isLight ? '#475569' : '#cbd5e1';
-            ctx.font = 'bold 22px Vazirmatn, sans-serif';
-            ctx.fillText(`و${sIdx + 1}`, sx + (slotWidth - 10) / 2, sy + 32);
+            ctx.fillStyle = isExam ? '#d8b4fe' : subTextColor;
+            ctx.font = 'bold 24px Vazirmatn, sans-serif';
+            ctx.fillText(isExam ? '📝' : `و${sIdx + 1}`, sx + (slotWidth - 15) / 2, sy + 38);
 
-            ctx.font = '900 28px Vazirmatn, sans-serif';
+            ctx.font = '900 34px Vazirmatn, sans-serif';
             ctx.fillStyle = textColor;
             const shortClass = slot.className.replace('پۆلا ', '');
-            ctx.fillText(shortClass, sx + (slotWidth - 10) / 2, sy + 72);
+            ctx.fillText(shortClass, sx + (slotWidth - 15) / 2, sy + 78);
 
-            ctx.font = '700 18px Vazirmatn, sans-serif';
-            ctx.fillStyle = subTextColor;
-            ctx.fillText((slot.subject || teacherSubject).slice(0, 7), sx + (slotWidth - 10) / 2, sy + 98);
+            ctx.font = '700 20px Vazirmatn, sans-serif';
+            ctx.fillStyle = isExam ? '#a855f7' : subTextColor;
+            ctx.fillText((slot.subject || teacherSubject).slice(0, 8), sx + (slotWidth - 15) / 2, sy + 105);
           }
-          // If empty, leave completely blank without any text!
+          ctx.restore();
         });
 
         ctx.restore();
-        startY += cardH + wallpaperSpacing;
+        startY += cardH + wallpaperSpacing + 10;
       });
     }
 
@@ -3053,12 +3127,18 @@ const App: React.FC = () => {
     if (wallpaperShowFooter) {
       ctx.save();
       ctx.textAlign = 'center';
-      ctx.font = '700 28px Vazirmatn, sans-serif';
+      ctx.font = '900 34px Vazirmatn, sans-serif';
+      ctx.fillStyle = textColor;
+      ctx.fillText(`📱 جەتوەلا من — م. ${teacherName}`, width / 2, height - 100);
+      
+      ctx.font = '700 26px Vazirmatn, sans-serif';
       ctx.fillStyle = subTextColor;
-      ctx.fillText(`📱 بەرنامەیێ جەتوەلا من — ${teacherName} | 2026`, width / 2, height - 60);
+      ctx.fillText('بەرنامەیێ زیرەک بۆ ڕێکخستنا جەتوەلا مامۆستایان | 2026', width / 2, height - 60);
       ctx.restore();
     }
   };
+
+
 
   const downloadWallpaperImage = async () => {
     const canvas = wallpaperCanvasRef.current;
@@ -3179,32 +3259,16 @@ const App: React.FC = () => {
     ctx.fill();
     ctx.restore();
 
-    const drawRoundedRect = (x: number, y: number, w: number, h: number, r: number, fill: string, stroke?: string, strokeWidth = 2) => {
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(x + r, y);
-      ctx.arcTo(x + w, y, x + w, y + h, r);
-      ctx.arcTo(x + w, y + h, x, y + h, r);
-      ctx.arcTo(x, y + h, x, y, r);
-      ctx.arcTo(x, y, x + w, y, r);
-      ctx.closePath();
-      ctx.fillStyle = fill;
-      ctx.fill();
-      if (stroke) {
-        ctx.strokeStyle = stroke;
-        ctx.lineWidth = strokeWidth;
-        ctx.stroke();
-      }
-      ctx.restore();
-    };
+    ctx.fill();
+    ctx.restore();
 
     const activeSlot = currentLiveSlot.slot;
     const isBreak = currentLiveSlot.status === 'break';
 
     if (style === 'current') {
-      drawRoundedRect(30, 30, width - 60, height - 60, 48, 'transparent', cardBorder, 3);
+      drawRoundedRect(ctx, 30, 30, width - 60, height - 60, 48, 'transparent', cardBorder, 3);
 
-      drawRoundedRect(60, 60, width - 120, 64, 32, cardBg, cardBorder, 1.5);
+      drawRoundedRect(ctx, 60, 60, width - 120, 64, 32, cardBg, cardBorder, 1.5);
       ctx.textAlign = 'right';
       ctx.font = '900 24px Vazirmatn, sans-serif';
       ctx.fillStyle = primaryTextColor;
@@ -3216,12 +3280,12 @@ const App: React.FC = () => {
       ctx.fillStyle = accentColor;
       ctx.fillText(nowTimeStr, 90, 101);
 
-      drawRoundedRect(60, 150, width - 120, 400, 40, cardBg, cardBorder, 2);
+      drawRoundedRect(ctx, 60, 150, width - 120, 400, 40, cardBg, cardBorder, 2);
 
       const statusText = activeSlot ? "🟢 وانا کارایە" : (isBreak ? "☕ دەمێ فرسەتێ (پشوو)" : "🏁 دەرڤەی دەوامێ");
       const statusBg = activeSlot ? "rgba(16, 185, 129, 0.25)" : (isBreak ? "rgba(245, 158, 11, 0.25)" : "rgba(100, 116, 139, 0.25)");
       const statusBorder = activeSlot ? "#10b981" : (isBreak ? "#f59e0b" : "#64748b");
-      drawRoundedRect(width / 2 - 140, 180, 280, 52, 26, statusBg, statusBorder, 2);
+      drawRoundedRect(ctx, width / 2 - 140, 180, 280, 52, 26, statusBg, statusBorder, 2);
 
       ctx.textAlign = 'center';
       ctx.font = '900 22px Vazirmatn, sans-serif';
@@ -3240,7 +3304,7 @@ const App: React.FC = () => {
         ctx.fillText(`${activeDay} — ${teacherSubject}`, width / 2, 370);
       }
 
-      drawRoundedRect(90, 415, width - 180, 105, 28, 'rgba(0, 0, 0, 0.35)', accentColor, 2);
+      drawRoundedRect(ctx, 90, 415, width - 180, 105, 28, 'rgba(0, 0, 0, 0.35)', accentColor, 2);
       ctx.font = '700 22px Vazirmatn, sans-serif';
       ctx.fillStyle = subTextColor;
       ctx.fillText("دەمێ مای بۆ زەنگا پاشتر:", width / 2, 450);
@@ -3249,7 +3313,7 @@ const App: React.FC = () => {
       ctx.fillStyle = accentColor;
       ctx.fillText(timeRemaining || "00:00", width / 2, 498);
 
-      drawRoundedRect(60, 570, width - 120, 160, 36, cardBg, cardBorder, 1.5);
+      drawRoundedRect(ctx, 60, 570, width - 120, 160, 36, cardBg, cardBorder, 1.5);
       ctx.textAlign = 'right';
       ctx.font = '900 26px Vazirmatn, sans-serif';
       ctx.fillStyle = primaryTextColor;
@@ -3264,9 +3328,9 @@ const App: React.FC = () => {
       );
     }
     else if (style === 'today') {
-      drawRoundedRect(20, 20, width - 40, height - 40, 40, 'transparent', cardBorder, 3);
+      drawRoundedRect(ctx, 20, 20, width - 40, height - 40, 40, 'transparent', cardBorder, 3);
 
-      drawRoundedRect(40, 40, width - 80, 80, 28, cardBg, cardBorder, 1.5);
+      drawRoundedRect(ctx, 40, 40, width - 80, 80, 28, cardBg, cardBorder, 1.5);
       ctx.textAlign = 'right';
       ctx.font = '900 32px Vazirmatn, sans-serif';
       ctx.fillStyle = primaryTextColor;
@@ -3295,9 +3359,9 @@ const App: React.FC = () => {
         const sFill = isActive ? 'rgba(99, 102, 241, 0.35)' : (isEmpty ? 'rgba(255, 255, 255, 0.03)' : cardBg);
         const sStroke = isActive ? accentColor : (isEmpty ? 'rgba(255, 255, 255, 0.08)' : cardBorder);
 
-        drawRoundedRect(xPos, slotY, slotW, slotH, 24, sFill, sStroke, isActive ? 3 : 1.5);
+        drawRoundedRect(ctx, xPos, slotY, slotW, slotH, 24, sFill, sStroke, isActive ? 3 : 1.5);
 
-        drawRoundedRect(xPos + 12, slotY + 12, slotW - 24, 36, 14, isActive ? accentColor : 'rgba(255, 255, 255, 0.1)', undefined);
+        drawRoundedRect(ctx, xPos + 12, slotY + 12, slotW - 24, 36, 14, isActive ? accentColor : 'rgba(255, 255, 255, 0.1)', undefined);
         ctx.textAlign = 'center';
         ctx.font = '900 18px Vazirmatn, sans-serif';
         ctx.fillStyle = '#ffffff';
@@ -3313,7 +3377,7 @@ const App: React.FC = () => {
           ctx.fillStyle = subTextColor;
           ctx.fillText((s.subject || teacherSubject).slice(0, 8), xPos + slotW / 2, slotY + 185);
 
-          drawRoundedRect(xPos + 10, slotY + slotH - 70, slotW - 20, 50, 14, 'rgba(0, 0, 0, 0.3)', undefined);
+          drawRoundedRect(ctx, xPos + 10, slotY + slotH - 70, slotW - 20, 50, 14, 'rgba(0, 0, 0, 0.3)', undefined);
           ctx.font = '700 14px Vazirmatn, monospace';
           ctx.fillStyle = isActive ? '#a5f3fc' : '#cbd5e1';
           ctx.fillText(`${s.startTime}`, xPos + slotW / 2, slotY + slotH - 46);
@@ -3326,8 +3390,8 @@ const App: React.FC = () => {
       });
     }
     else if (style === 'bar') {
-      drawRoundedRect(16, 16, width - 32, height - 32, 32, 'transparent', cardBorder, 2.5);
-      drawRoundedRect(32, 32, width - 64, height - 64, 24, cardBg, cardBorder, 1.5);
+      drawRoundedRect(ctx, 16, 16, width - 32, height - 32, 32, 'transparent', cardBorder, 2.5);
+      drawRoundedRect(ctx, 32, 32, width - 64, height - 64, 24, cardBg, cardBorder, 1.5);
 
       ctx.textAlign = 'right';
       ctx.font = '900 28px Vazirmatn, sans-serif';
@@ -3338,7 +3402,7 @@ const App: React.FC = () => {
       ctx.fillStyle = subTextColor;
       ctx.fillText(`${activeDay} | ${teacherSubject}`, width - 70, 150);
 
-      drawRoundedRect(width / 2 - 180, 50, 360, 155, 24, activeSlot ? 'rgba(99, 102, 241, 0.3)' : 'rgba(0,0,0,0.2)', accentColor, 2);
+      drawRoundedRect(ctx, width / 2 - 180, 50, 360, 155, 24, activeSlot ? 'rgba(99, 102, 241, 0.3)' : 'rgba(0,0,0,0.2)', accentColor, 2);
 
       ctx.textAlign = 'center';
       ctx.font = '900 20px Vazirmatn, sans-serif';
@@ -3364,9 +3428,9 @@ const App: React.FC = () => {
       ctx.fillText(nextLiveSlot ? `پاشتر: ${nextLiveSlot.className}` : "وانە نەمایە", 70, 160);
     }
     else if (style === 'week') {
-      drawRoundedRect(20, 20, width - 40, height - 40, 48, 'transparent', cardBorder, 3);
+      drawRoundedRect(ctx, 20, 20, width - 40, height - 40, 48, 'transparent', cardBorder, 3);
 
-      drawRoundedRect(40, 40, width - 80, 100, 32, cardBg, cardBorder, 1.5);
+      drawRoundedRect(ctx, 40, 40, width - 80, 100, 32, cardBg, cardBorder, 1.5);
       ctx.textAlign = 'right';
       ctx.font = '900 36px Vazirmatn, sans-serif';
       ctx.fillStyle = primaryTextColor;
@@ -3388,9 +3452,9 @@ const App: React.FC = () => {
         const dayData = schedule[dayName];
         const isCurrentDay = activeDay === dayName;
 
-        drawRoundedRect(40, ry, width - 80, rowH, 24, isCurrentDay ? 'rgba(99, 102, 241, 0.2)' : cardBg, isCurrentDay ? accentColor : cardBorder, isCurrentDay ? 2 : 1);
+        drawRoundedRect(ctx, 40, ry, width - 80, rowH, 24, isCurrentDay ? 'rgba(99, 102, 241, 0.2)' : cardBg, isCurrentDay ? accentColor : cardBorder, isCurrentDay ? 2 : 1);
 
-        drawRoundedRect(width - 200, ry + 20, 140, rowH - 40, 18, isCurrentDay ? accentColor : 'rgba(255, 255, 255, 0.1)', undefined);
+        drawRoundedRect(ctx, width - 200, ry + 20, 140, rowH - 40, 18, isCurrentDay ? accentColor : 'rgba(255, 255, 255, 0.1)', undefined);
         ctx.textAlign = 'center';
         ctx.font = '900 22px Vazirmatn, sans-serif';
         ctx.fillStyle = '#ffffff';
@@ -3406,7 +3470,7 @@ const App: React.FC = () => {
           const sx = width - 230 - (i + 1) * sW - i * 10;
           const isEmpty = !slot || slot.className === 'بێ وانە';
 
-          drawRoundedRect(sx, ry + 20, sW, rowH - 40, 16, isEmpty ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.08)', 'rgba(255,255,255,0.1)', 1);
+          drawRoundedRect(ctx, sx, ry + 20, sW, rowH - 40, 16, isEmpty ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.08)', 'rgba(255,255,255,0.1)', 1);
 
           ctx.textAlign = 'center';
           ctx.font = '700 16px Vazirmatn, sans-serif';
@@ -5425,6 +5489,7 @@ const App: React.FC = () => {
                               }}
                               className="w-full text-xs p-2.5 bg-white border border-purple-300 rounded-xl font-black text-purple-900 outline-none"
                             >
+                              <option value={0}>بێ فرسەت (٠ خولەک)</option>
                               <option value={5}>5 خولەک</option>
                               <option value={10}>10 خولەک (جەرەسێ 10 خولەک)</option>
                               <option value={15}>15 خولەک</option>
@@ -7088,23 +7153,31 @@ const App: React.FC = () => {
                             </div>
                           </div>
 
-                          <label className="relative inline-flex items-center cursor-pointer">
+                          <label className="relative inline-flex items-center cursor-pointer group" title="چالاککرنا خشتەیێ ئیمتیحانێ بۆ هەموو مامۆستایان">
                             <input
                               type="checkbox"
                               checked={alarmSettings.examSettings?.enabled || false}
                               onChange={(e) => {
-                                setAlarmSettings((prev) => ({
-                                  ...prev,
+                                const isEnabled = e.target.checked;
+                                const updated = {
+                                  ...alarmSettings,
                                   examSettings: {
-                                    ...prev.examSettings,
-                                    enabled: e.target.checked
+                                    ...alarmSettings.examSettings,
+                                    enabled: isEnabled
                                   }
-                                }));
+                                };
+                                setAlarmSettings(updated);
+                                applySettingsToSchedule(updated);
+                                // Automatically save to Firestore if admin is logged in to broadcast immediately
+                                if (isAdminLoggedIn) {
+                                  handleAdminSaveMasterSettings(updated);
+                                }
                               }}
                               className="sr-only peer"
                             />
                             <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
                           </label>
+
                         </div>
 
                         {/* Explanatory Rule Callout */}
@@ -7167,19 +7240,24 @@ const App: React.FC = () => {
                           </div>
 
                           <div>
-                            <label className="text-[11px] font-black text-purple-900 block mb-1">فرسەت پشتی انتیحانێ:</label>
-                            <input
-                              type="number"
-                              value={alarmSettings.examSettings?.breakAfterExam || 10}
+                            <label className="text-[11px] font-black text-purple-900 block mb-1">فرسەت پشتی انتیحانێ (خولەک):</label>
+                            <select
+                              value={alarmSettings.examSettings?.breakAfterExam ?? 10}
                               onChange={(e) => {
-                                const val = parseInt(e.target.value) || 10;
+                                const val = parseInt(e.target.value);
                                 setAlarmSettings((prev) => ({
                                   ...prev,
                                   examSettings: { ...prev.examSettings, breakAfterExam: val }
                                 }));
                               }}
                               className="w-full p-2.5 bg-white border border-purple-300 rounded-xl font-bold text-xs outline-none"
-                            />
+                            >
+                              <option value={0}>بێ فرسەت (٠)</option>
+                              <option value={5}>5 خولەک</option>
+                              <option value={10}>10 خولەک</option>
+                              <option value={15}>15 خولەک</option>
+                              <option value={20}>20 خولەک</option>
+                            </select>
                           </div>
                         </div>
                       </div>
@@ -7974,9 +8052,16 @@ const App: React.FC = () => {
                 <LayoutGrid className="text-white w-4 h-4 sm:w-5 sm:h-5" />
               </div>
               <div className="min-w-0">
-                <h1 className="text-sm sm:text-base md:text-lg font-black text-slate-800 truncate">
+                <h1 className="text-sm sm:text-base md:text-lg font-black text-slate-800 truncate flex items-center gap-2">
                   جەتوەلا من (خشتەیێ قوتابخانێ)
+                  {alarmSettings.examSettings?.enabled && (
+                    <span className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-[9px] px-2.5 py-1 rounded-full animate-pulse shadow-sm shrink-0 flex items-center gap-1 border border-purple-400/50">
+                      <GraduationCap className="w-3 h-3" />
+                      <span>مودێ انتیحانێ چالاکە 📝</span>
+                    </span>
+                  )}
                 </h1>
+
                 <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-bold truncate mt-0.5">
                   <span className="truncate">{teacherSubject} - {teacherName}</span>
                   <span className="hidden sm:inline-block text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full font-black text-[9px] shrink-0">
@@ -8713,7 +8798,7 @@ const App: React.FC = () => {
                     <div className="flex justify-between items-center mb-4">
                       <div className="flex items-center gap-1.5">
                         <span
-                          className="text-white text-[10px] font-black px-3 py-1 rounded-full shadow-sm"
+                          className="text-white text-[10px] font-black px-3 py-1 rounded-full shadow-sm flex items-center gap-1"
                           style={{
                             backgroundColor:
                               status === 'finished'
@@ -8727,11 +8812,13 @@ const App: React.FC = () => {
                                 : 'var(--primary-color)',
                           }}
                         >
+                          {isExamSlot ? <GraduationCap className="w-3 h-3" /> : null}
                           وانا {index + 1}
                         </span>
                         {isExamSlot && (
-                          <span className="text-[9px] font-black bg-purple-100 text-purple-700 px-2 py-0.5 rounded-md">
-                            ئیمتیحان 📝
+                          <span className="text-[9px] font-black bg-purple-100 text-purple-700 px-2 py-0.5 rounded-md flex items-center gap-1 border border-purple-200">
+                            <PenTool className="w-2.5 h-2.5" />
+                            ئیمتیحان
                           </span>
                         )}
                         {statusLabel && (
@@ -9053,16 +9140,23 @@ const App: React.FC = () => {
                     <th className="p-1 sm:p-2.5 border-l border-slate-200 w-[18%] sm:w-[14%]">
                       <span>ڕۆژ</span>
                     </th>
-                    {Array.from({ length: alarmSettings.lessonCount || 6 }).map((_, i) => (
-                      <th key={i} className="p-1 sm:p-2.5 border-l border-slate-200 font-black text-xs sm:text-base text-slate-800">
-                        <div className="flex flex-col items-center justify-center">
-                          <span>{i + 1}</span>
-                          {alarmSettings.examSettings?.enabled && alarmSettings.examSettings.examLessonNumber === i + 1 && (
-                            <span className="text-[7px] sm:text-[9px] font-black text-purple-800 bg-purple-100 px-1 rounded">ئیمتیحان</span>
-                          )}
-                        </div>
-                      </th>
-                    ))}
+                    {(() => {
+                      // Dynamically use the slots from the first day to get the count
+                      const firstDaySlots = schedule[DAYS[0]]?.slots || [];
+                      return firstDaySlots.map((slot, i) => (
+                        <th key={i} className="p-1 sm:p-2.5 border-l border-slate-200 font-black text-xs sm:text-base text-slate-800">
+                          <div className="flex flex-col items-center justify-center gap-0.5">
+                            <span className={slot.isExam ? 'text-purple-700' : ''}>{slot.isExam ? 'ئیمتیحان' : slot.lessonNumber || i + 1}</span>
+                            {slot.isExam && (
+                              <div className="flex items-center gap-0.5 bg-purple-100 px-1.5 py-0.5 rounded text-[8px] sm:text-[10px] text-purple-700">
+                                <PenTool className="w-2.5 h-2.5" />
+                                <span className="hidden sm:inline">EXAM</span>
+                              </div>
+                            )}
+                          </div>
+                        </th>
+                      ));
+                    })()}
                   </tr>
                 </thead>
                 <tbody>
